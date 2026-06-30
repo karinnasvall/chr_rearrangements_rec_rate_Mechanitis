@@ -1,0 +1,22 @@
+#!/bin/bash
+#BSUB -M 40000
+#BSUB -R "select[mem>40000] rusage[mem=40000] span[hosts=1]"
+#BSUB -n 16
+#BSUB -q long
+#BSUB -J pggb[1-5]
+#BSUB -o log/pggb.%J.%I.out
+#BSUB -e log/pggb.%J.%I.err
+
+
+tolid=$(sed -n -e ${LSB_JOBINDEX}p list_tolid_2hap.txt)
+
+input_path=input
+output_path=output/${tolid}
+
+mkdir $output_path
+
+echo "Processing $tolid"
+
+module load samtools/1.20--h50ea8bc_0 pggb/20241229212048cc3325
+
+pggb -i $input_path/${tolid}.merged.fa.gz -o $output_path/ -n 2 -t 16 --exclude-delim "_"

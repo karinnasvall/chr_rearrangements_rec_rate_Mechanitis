@@ -1,0 +1,31 @@
+#!/bin/bash
+#BSUB -M 1000
+#BSUB -R "select[mem>1000] rusage[mem=1000] span[hosts=1]"
+#BSUB -n 4
+#BSUB -q normal
+#BSUB -J merge_hap[1-89]
+#BSUB -o log/merge_hap.%J.%I.out
+#BSUB -e log/merge_hap.%J.%I.err
+
+
+tolid=$(sed -n -e ${LSB_JOBINDEX}p list_path_hap2.txt)
+
+input_path=/data/tol/teams/meier/lustre/projects/ithomiini/comp_gen/01_data/renamed_fasta_W_hap2/
+output_path=input
+
+#mkdir $output_path
+
+if [ ! -f "$input_path/${tolid}_2_W.fa.gz" ]; then
+    echo "ERROR: Input file $input_path/${tolid}_2_W.fa.gz does not exist. Stopping execution."
+    exit 1
+fi
+
+echo "Processing $tolid"
+
+module load samtools-1.19.2/python-3.11.6
+
+cat $input_path/${tolid}_1_noW.fa.gz $input_path/${tolid}_2_W.fa.gz | gunzip - | sed 's/_/\#/g' > $output_path/${tolid}.merged.fa
+bgzip -@ 4 $output_path/${tolid}.merged.fa
+samtools faidx $output_path/${tolid}.merged.fa.gz
+
+
