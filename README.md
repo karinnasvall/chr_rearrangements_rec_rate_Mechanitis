@@ -1,4 +1,4 @@
-# chr_rearrangements_rec_rate_Mechanitis
+# Chromosomal rearrangements remodel the recombination landscape in holocentric butterflies
 
 This is a repository for the scripts used in the analysis in manuscript <i>Chromosomal rearrangements remodel the recombination landscape in holocentric butterflies<i>. 
 
