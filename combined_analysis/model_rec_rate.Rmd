@@ -1,0 +1,1283 @@
+---
+title: "model"
+author: "Karin Näsvall"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Model recombination rate
+
+Issue	    Tool
+**Collinearity**	Correlation matrix + VIF
+**Non-normality of predictors**	Spearman correlation, rank-transform, or GAM
+**Spatial autocorrelation**	Random effects for genome/chr, or GAM with s(window_mid)
+**Non-linear effects**	mgcv::gam() with smooth terms
+For highly non-linear relationships (likely for recombination), a GAM (mgcv) is often more appropriate than linear models — start with the correlation/VIF step regardless, then decide between lmer and gam.
+
+
+1. Pivot wide and explore distributions
+
+```{r data}
+library(broom.mixed)
+library(dplyr)
+library(GGally)
+library(ggpubr)
+library(gratia)
+
+ # if this complains about dplyr version restart and load dplyr before tidyverse
+library(tidyverse)
+library(patchwork)
+
+pop_gen_feat <- c("dxy", "Fst", "pi_Mpol", "pi_Mlys", "sites")
+repeat_feat <- c("Total_repeats","LTR", "LINE", "DNA", "RC", "Simple_repeat","SINE", "Overlapping", "Low_complexity", "Unknown")
+other_features <- c("GC","Genes","eig_scores", "E2_corr", "Recombination_rate")
+
+
+combined_df_brp <- read_csv("tables/combined_df_incl_brp_rel_pos2026-06-19.csv") %>% filter(!feature %in% pop_gen_feat)
+
+combined_df_brp$break_status <- combined_df_brp$type
+combined_df_brp <- combined_df_brp %>% filter(!type %in% c("Complex")) %>% select(-type)
+
+
+wide_df <- combined_df_brp %>%
+  pivot_wider(names_from = feature, values_from = value) 
+
+# Classify each chromosome as colinear (all windows colinear) or rearranged (any non-colinear window)
+chr_class <- wide_df %>%
+  group_by(genome, chr) %>%
+  summarise(chr_category = if (all(event_timing %in% c("colinear", "end", "shared_event_n4", "anc_proxy"), na.rm = TRUE)) "colinear" else "rearranged",
+            .groups = "drop")
+
+View(chr_class)
+
+wide_df <- wide_df %>%
+  left_join(chr_class, by = c("genome", "chr"))
+
+# remove sex chromosomes from the model
+wide_df <- wide_df %>% filter(!chr %in% c("Z", "W", "Z1", "Z2", "W1")) 
+
+wide_df <- wide_df[!(wide_df$genome == "ilMecLysi212" & wide_df$chr == "10"), ]
+combined_df_brp <- left_join(combined_df_brp, chr_class)
+wide_df
+```
+
+
+## 2. Check distributions, pairwise correlations, and collinearity first
+
+This shows which variables to consider dropping or combining.
+
+```{r}
+library(corrplot)
+
+feat_cols_all <- setdiff(names(wide_df), c("chr", "start", "end", "genome","window_mid", "break_status","event_timing", "chr_category", "i.start", "i.end"))
+
+cor_mat <- cor(wide_df[, feat_cols_all], use = "pairwise.complete.obs", method = "spearman")
+
+# Blue–white–red (classic diverging)
+col = colorRampPalette(c("royalblue4", "white", "firebrick"))(200)
+
+# clustered correlation matrix with coefficients
+pdf("plots/correlation_matrix_rr.pdf", width = 16, height = 16)
+corrplot(cor_mat, method = "color", order = "hclust", tl.cex = 0.7,
+         addCoef.col = "black", number.cex = 1, 
+         col = colorRampPalette(c("#0072B2",  "white", "#D55E00"))(200))
+dev.off()
+
+# Pairwise scatterplots with Spearman correlations and distributions on the diagonal
+ggpairs(wide_df[, feat_cols_all],
+        lower = list(continuous = wrap("points", alpha = 0.1, size = 0.3)),
+        diag  = list(continuous = wrap("densityDiag")),
+        upper = list(continuous = wrap("cor", method = "spearman")))
+
+ggsave("plots/pairwise_plots_rr.pdf", width = 30, height = 24)
+
+
+
+feat_cols <- feat_cols_all[!feat_cols_all %in% c("Total_repeats",  "dist_telomere", "rel_position", "Recombination_rate", "E3", "closest_break_type", "chr_category.x", "chr_category.y" )] # LINEs are driving Total repeats
+
+```
+
+Drop "Total repeat" which is strongly driven by LINEs, distance to telomere which both are almost the same as rel position. 
+I also drop recombination rate from the predictors, but keep it as the response variable.
+
+
+## 3. Remove near-redundant variables (VIF)
+
+Variance Inflation Factor (VIF) measures how much the variance of a regression coefficient is inflated due to collinearity with other predictors.
+
+
+```{r}
+
+library(car)
+
+# Fit a provisional linear model with all predictors
+f <- as.formula(paste("Recombination_rate ~", paste("break_status", paste(feat_cols, collapse = " + "), sep = " + ")))
+vif(lm(f, data = wide_df, na.action = na.exclude))
+
+sink("tables/model_VIF.txt")
+print(vif(lm(f, data = wide_df, na.action = na.exclude)))
+sink()
+
+
+```
+
+
+Interpretation:
+
+VIF	Meaning
+1	No collinearity
+1–5	Moderate, usually acceptable
+5–10	High, worth investigating
+>10	Severe — predictor is nearly redundant with others
+
+Drop variables with VIF > 10, keeping the one with the clearest biological interpretation.
+
+
+
+## 4. Account for spatial autocorrelation
+
+Use a mixed model with genome as a random effect and, if needed, a spatial correlation structure:
+
+```{r}
+library(lme4)
+
+m0 <- lmer(as.formula(paste("Recombination_rate ~", paste("break_status", paste(feat_cols, collapse = " + "), sep = " + "), "+ (1 | genome)")),
+           data = wide_df, REML = FALSE)
+
+
+summary(m0)
+
+sink("tables/model_summaries.txt")
+cat("\n=== GLM ===\n")
+print(summary(m0))
+sink()
+
+```
+
+## 5. Standardise predictors for comparability 
+
+```{r}
+        
+wide_df <- wide_df %>%
+  mutate(across(all_of(feat_cols), ~ scale(.)[,1], .names = "{.col}_z"))
+
+feat_cols_sc <- paste0(feat_cols, "_z")
+
+m0_sc <- lmer(as.formula(paste("Recombination_rate ~", paste("break_status", paste(feat_cols_sc, collapse = " + "), sep = " + "), 
+              "+ (1 | genome)")),
+           data = wide_df, REML = FALSE)
+
+summary(m0_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=m0_sc =\n")
+print(summary(m0_sc))
+sink()
+
+
+```
+
+```{r eval_model}
+
+
+tidy(m0_sc, effects = "fixed", conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(x = estimate, y = reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Standardised effect on recombination rate", y = NULL) +
+  theme_classic()
+
+ggsave(paste("plots/model_effects_rr_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 6)
+
+
+```
+
+## 6. Model diagnostics and refinement
+
+model diagnostics: check residuals for normality and homoscedasticity, 
+and consider alternative models (e.g., GAM) if assumptions are violated.
+
+```{r diagnostics}
+
+pdf(paste("plots/model_diagnostics_rr_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+par(mfrow = c(1, 1))
+
+residuals <- resid(m0_sc)
+hist(residuals, main = "Residuals Histogram", xlab = "Residuals", breaks = 30)
+plot(m0_sc)
+qqnorm(residuals(m0_sc))
+qqline(residuals(m0_sc))  
+dev.off()
+
+library(DHARMa)
+sim_res <- simulateResiduals(m0_sc)
+
+pdf("plots/model_diagnostics_rr_simres.pdf", width = 8, height = 8)
+plot(sim_res)    # QQ + residuals vs fitted
+testOutliers(sim_res)
+testDispersion(sim_res)                  
+dev.off()
+
+
+sink("tables/model_diagnostics_simres_m2.txt")
+print(testOutliers(sim_res))
+print(testDispersion(sim_res))
+sink()
+
+
+```
+
+There are ~2× more outliers than expected under the model. This does not necessarily invalidate the model, but suggests the tails of the residual distribution are heavier than a Gaussian.
+The GAM may handle this better, consider a response transformation (log) or a different family (e.g. Gamma if all values are positive).
+
+
+
+This model is quite complex, and some predictors have confidence intervals that include zero, suggesting they may not be significant. 
+The distribution of residuals is skewed, and there is a funnel shape that suggests heteroscedasticity.
+It might be worth trying a GAM to allow for non-linear relationships, or at least removing some non-significant predictors to simplify the model.
+
+A stepwise approach to model refinement can help identify a more parsimonious model that still explains the data well.
+
+First, I will transform the response variable to see if that improves the residuals.
+
+
+```{r transform_response}
+
+wide_df <- wide_df %>%
+  mutate(Recombination_rate_log = log10(Recombination_rate + 1e-6)) # add small constant to avoid log(0)
+
+m0_log <- lmer(as.formula(paste("Recombination_rate_log ~", paste("break_status", "chr_status", paste(feat_cols_sc, collapse = " + "), sep = " + "), "+ (1 | genome)")),
+           data = wide_df, REML = FALSE)
+
+
+summary(m0_log)
+
+pdf("plots/model_diagnostics_rr_log.pdf", width = 8, height = 8)
+par(mfrow = c(1, 1))
+residuals <- resid(m0_log)
+hist(residuals, main = "Residuals Histogram", xlab = "Residuals", breaks = 30)
+plot(m0_log)
+qqnorm(residuals(m0_log))
+qqline(residuals(m0_log))
+dev.off()
+
+anova(m0_sc, m0_log)
+
+tidy(m0_sc, effects = "fixed", conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(x = estimate, y = reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Standardised effect on recombination rate", y = NULL) +
+  theme_classic()
+
+ggsave("plots/model_effects_rr_log.pdf", width = 8, height = 6)
+
+```
+
+With log transformation, the residuals look skewed in with a long tail in the negative direction, but the heteroscedasticity is reduced.
+The qqnorm plot still shows strong deviation from normality, but but only at one end now. 
+Kurtosis describes the shape of a distribution tails relative to a normal distribution, both tails curve away form the normal line in the qqplot, which suggests heavier tails than normal.
+
+
+
+```{refine_model}
+coef_tbl <- tidy(m0_sc, effects = "fixed", conf.int = TRUE) %>%
+  filter(term != "(Intercept)")
+
+non_sig <- coef_tbl %>%
+  filter(conf.low < 0 & conf.high > 0) %>%
+  pull(term)
+
+non_sig
+
+feat_cols_sc_sig <- feat_cols_sc[!feat_cols_sc %in% non_sig]
+
+m1_sc <- lmer(as.formula(paste("Recombination_rate ~",
+                                paste(feat_cols_sc_sig, collapse = " + "), 
+                                "+ (1 | genome)")),
+              data = wide_df, REML = FALSE)
+
+summary(m1_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=m1_sc =\n")
+print(summary(m1_sc))
+sink()
+
+```
+
+```{r}
+# Compare models
+anova(m0_sc, m1_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=Compare models=\n")
+print(anova(m0_sc, m1_sc))
+sink()
+
+```
+
+AIC and BIC suggest that the simpler model (m1_sc) is preferred, but the p-value is borderline.
+
+
+```{r}
+# Try adding back break_status nd chr_status, they are both significant in the full model and biologically relevant, but they are also related to each other, so I will add them back together.
+m2_sc <- update(m1_sc, . ~ . + break_status + chr_status)
+anova(m1_sc, m2_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=Compare models: Added break_status and chr_status=\n")
+print(anova(m1_sc, m2_sc))
+sink()
+
+```
+
+
+This significantly inproves the model fit. 
+
+
+
+```{r}
+# Try adding back Genes_z 
+m3_sc <- update(m2_sc, . ~ . + Genes_z)
+anova(m2_sc, m3_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=Compare models: Added Genes_z=\n")
+print(anova(m2_sc, m3_sc))
+sink()
+
+```
+
+Very limited effect on the model, and not significant, so I do not add Genes_z back in.
+
+```{r}
+
+m4_sc <- update(m2_sc, . ~ . + rel_position_z)
+anova(m2_sc, m4_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=Compare models: Added rel_position_z=\n")
+print(anova(m2_sc, m4_sc))
+sink()
+
+
+
+```
+
+Relative position does not seem to have a significant effect when added back to the model with break_status, 
+so I would not include it.
+
+
+```{r}
+
+m5_sc <- update(m2_sc, . ~ . + chr_length_z)
+anova(m2_sc, m5_sc)
+
+sink("tables/model_summaries.txt", append = TRUE)
+cat("\n=Compare models: Added chr_length_z=\n")
+print(anova(m2_sc, m5_sc))
+sink()
+
+```
+
+Adding chromosome length back in has a borderline significant effect on the model, but it is not significant at the 0.05 level, so I do not include it either.
+
+
+```{r diagnostics}
+
+pdf("plots/model_diagnostics_rr_m2.pdf", width = 8, height = 8)
+par(mfrow = c(1, 1))
+
+residuals <- resid(m2_sc)
+hist(residuals, main = "Residuals Histogram", xlab = "Residuals", breaks = 30)
+plot(m2_sc)
+qqnorm(residuals(m2_sc))
+qqline(residuals(m2_sc))  
+dev.off()
+
+library(DHARMa)
+sim_res <- simulateResiduals(m2_sc)
+
+pdf("plots/model_diagnostics_rr_simres_m2.pdf", width = 8, height = 8)
+plot(sim_res)                      # QQ + residuals vs fitted
+testOutliers(sim_res)
+testDispersion(sim_res)
+dev.off()
+
+```
+
+
+## Non-linear model
+
+Since many of the relationships between predictors and recombination rate are likely non-linear, a GAM can be a better choice to model these relationships.
+Generalised Additive Model uses smooth functions of predictors instead of the predictors themselves.
+
+gam or bam() in mgcv (nlme::gam is not recommended for large datasets)
+
+
+s() defines a smooth term — it lets the relationship between a predictor and the response be non-linear, fitted as a spline.
+
+
+How flexible the curve is is controlled automatically by the penalty (REML/GCV) — it finds the smoothest curve that still fits the data, preventing overfitting. 
+The edf (effective degrees of freedom) in summary() tells you how non-linear the fitted curve is:
+
+edf	Meaning
+~1	Essentially linear
+~2	Quadratic-like
+>3	Clearly non-linear
+
+
+```{r non_linar_model_gam0}
+
+library(mgcv)
+library(marginaleffects)
+
+wide_df$genome <- as.factor(wide_df$genome)
+wide_df$chr_category <- as.factor(wide_df$chr_category)
+
+smooth_terms <- paste0("s(", feat_cols_sc, ")", collapse = " + ")
+
+gam0 <- gam(
+  as.formula(paste("Recombination_rate ~ s(genome, bs = 're') + break_status  +", smooth_terms)),
+  data   = wide_df,
+  method = "REML"           # fast REML, recommended for large data
+)
+
+summary(gam0)
+
+sink(paste("tables/non_linear_model_summaries_", Sys.Date(), ".txt", sep = ""))
+cat("\n=GAM=\n")
+print(summary(gam0))
+sink()
+
+gam.check(gam0)
+
+sink(paste("tables/gam_diagnostics_rr_", Sys.Date(), ".txt", sep = ""))
+gam.check(gam0)
+sink()
+
+pdf(paste("plots/gam_diagnostics_rr2_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+plot.gam(gam0, pages = 1, shade = TRUE)
+dev.off()
+
+pdf(paste("plots/gam_marginal_effects_rr_rel_pos_", Sys.Date(), ".pdf", sep = ""),
+    width = 8, height = 8)
+plot_predictions(gam0, condition = c("rel_position_z", "genome", "chr_status"), 
+                type = "response") +
+  labs(x = "Relative position (z-score)", y = "Recombination rate",
+                title = "Marginal effects of rel_position_z on recombination rate")
+dev.off()
+
+pdf("plots/gam_marginal_effects_rr_chr_length.pdf", width = 8, height = 8)
+plot_predictions(gam0, condition = c("chr_length_z", "genome", "chr_status"), 
+                type = "response") +
+  labs(x = "Chromosome length (z-score)", y = "Recombination rate",
+                title = "Marginal effects of chr_length_z on recombination rate") 
+dev.off()
+
+```
+
+
+```{r gam_gamma_distribution}
+
+gam0_gamma <- gam(
+  as.formula(paste("Recombination_rate ~ s(genome, bs = 're') + break_status + chr_category.x +", smooth_terms)),
+  data   = wide_df,
+  method = "REML",           # fast REML, recommended for large data
+  family = Gamma(link = "log")
+)
+
+summary(gam0_gamma)
+
+sink(paste("tables/non_linear_model_summaries_", Sys.Date(), ".txt",sep = ""), append = TRUE)
+cat("\n=GAM Gamma=\n")
+print(summary(gam0_gamma))
+print(gam.check(gam0_gamma))
+sink()
+
+
+pdf(paste("plots/gam_diagnostics_rr_gamma_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+plot.gam(gam0_gamma, pages = 1, shade = TRUE)
+dev.off()
+
+#Check residuals visually
+pdf(paste("plots/gam_diagnostics_rr_gamma_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+par(mfrow = c(2, 2))
+gam.check(gam0_gamma)
+dev.off()
+
+
+AIC(gam0, gam0_gamma)
+BIC(gam0, gam0_gamma)
+
+sink(paste("tables/non_linear_model_summaries_", Sys.Date(), ".txt",sep = ""), append = TRUE)
+cat("\n=Model comparison=\n")
+print(AIC(gam0, gam0_gamma))
+print(BIC(gam0, gam0_gamma))
+sink()
+
+
+```
+
+Both AIC and BIC suggest that the GAM with Gamma family is preferred over the GAM with Gaussian family, so I will proceed with the Gamma GAM for further refinement.
+
+
+```{r refine_gam_gamma}
+
+# only significant predictors
+
+gam1 <- gam(
+  Recombination_rate ~ 
+    break_status + chr_category.x +
+    s(genome, bs = "re") + s(chr_length_z) + s(dist_telo_z) + s(dist_bp_kb_z) +
+    s(GC_z) + s(Genes_z) + s(LINE_z) + s(LTR_z) + s(Overlapping_z) + s(RC_z) + s(SINE_z) +
+    s(Unknown_z) + s(eig_scores_z),
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam1)
+
+
+AIC(gam0_gamma, gam1)
+BIC(gam0_gamma, gam1)
+
+sink(paste("tables/non_linear_model_summaries_", Sys.Date(), ".txt",sep = ""), append = TRUE)
+cat("\n=GAM Gamma reduced=\n")
+print(summary(gam1))
+print(gam.check(gam1))
+cat("\n=Model comparison GAM Gamma full vs reduced=\n")
+print(AIC(gam0_gamma, gam1))
+print(BIC(gam0_gamma, gam1))
+sink()
+
+
+pdf(paste("plots/gam_diagnostics_rr_gamma_reduced_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+plot.gam(gam1, pages = 1, shade = TRUE)
+dev.off()
+
+#Check residuals visually
+pdf(paste("plots/gam_diagnostics_rr_gamma_reduced2_", Sys.Date(), ".pdf", sep = ""), width = 8, height = 8)
+par(mfrow = c(2, 2))
+gam.check(gam1)
+dev.off()
+
+# add variable distance to breakpoint
+
+
+
+```
+
+The reduced model has slightly higher AIC but strongly reduced BIC, so I would prefer the reduced model for parsimony.
+The significance of the smooth terms is mostly unchanged, but the model is simpler and easier to interpret.
+
+```{r}
+
+gam1_mod <- gam(
+  Recombination_rate ~ 
+    break_status +
+    s(genome, bs = "re") + s(chr_length_z) + s(dist_telo_z) + s(dist_bp_kb_z) +
+    GC_z + Genes_z + s(LINE_z) + s(LTR_z) + s(Overlapping_z) + s(RC_z) + s(SINE_z) +
+    s(Unknown_z) + s(eig_scores_z) + s(E3_z),
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam1_mod)
+
+gam.check(gam1_mod)
+
+print(AIC(gam1, gam1_mod))
+print(BIC(gam1, gam1_mod))
+
+```
+
+```{r}
+gam1_mod_rpt <- gam(
+  Recombination_rate ~ 
+    break_status +
+    s(genome, bs = "re") + s(chr_length_z) + s(dist_telo_z) + s(dist_bp_kb_z) +
+    GC_z + Genes_z + s(Total_repeats) + s(eig_scores_z) + s(E3_z),
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam1_mod_rpt)
+
+gam.check(gam1_mod_rpt)
+
+print(AIC(gam1, gam1_mod_rpt))
+print(BIC(gam1, gam1_mod_rpt))
+```
+
+
+
+And including chr size in doubtfull beacuse the expected relationship between chromosome size and recombination rate is not well captured by the smooth term for chromosome size in the GAM, 
+suggesting it is not a significant predictor of recombination rate in this case.
+
+summary(gam_chr_f)
+
+Family: Gamma 
+Link function: log 
+
+Formula:
+Recombination_rate ~ break_status + chr_status + s(genome, bs = "re") + 
+    s(chr_f, bs = "re") + s(GC_z) + s(LINE_z) + s(LTR_z) + s(Overlapping_z) + 
+    s(Unknown_z) + s(eig_scores_z) + s(dist_telomere_z) + s(chr_length_z)
+
+Parametric coefficients:
+                           Estimate Std. Error t value Pr(>|t|)    
+(Intercept)                -1.10443    0.11649  -9.481  < 2e-16 ***
+break_statusfission        -0.04344    0.20029  -0.217 0.828321    
+break_statusfission;fusion -0.15324    0.13026  -1.176 0.239484    
+break_statusfusion         -0.30230    0.08129  -3.719 0.000202 ***
+chr_statusrearranged       -0.10318    0.05107  -2.020 0.043407 *  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Approximate significance of smooth terms:
+                       edf Ref.df        F  p-value    
+s(genome)           0.9539  1.000 1630.694 6.40e-07 ***
+s(chr_f)           20.3597 24.000   14.254  < 2e-16 ***
+s(GC_z)             1.0008  1.002   10.663  0.00109 ** 
+s(LINE_z)           4.6500  5.738   46.825  < 2e-16 ***
+s(LTR_z)            1.0007  1.001   23.351 1.64e-06 ***
+s(Overlapping_z)    1.0052  1.010   27.325 4.20e-07 ***
+s(Unknown_z)        4.4979  5.494    6.287 3.44e-06 ***
+s(eig_scores_z)     5.7421  6.965   28.143  < 2e-16 ***
+s(dist_telomere_z)  8.7815  8.986   82.140  < 2e-16 ***
+s(chr_length_z)     2.1464  2.192    1.448  0.18766    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+R-sq.(adj) =  0.302   Deviance explained = 32.5%
+-REML = -2928.9  Scale est. = 0.18237   n = 4983
+
+
+
+
+```{r plot_position_vs_rec_rate}
+ggarrange(
+ggplot(wide_df, aes(x = dist_telomere, y = Recombination_rate)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(aes(colour = chr), method = "loess", se = FALSE) +
+  facet_wrap(~ genome) +
+  labs(x = "Distance to telomere", y = "Recombination rate") +
+  theme_classic(),
+
+ggplot(wide_df, aes(x = rel_position, y = Recombination_rate)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(aes(colour = chr), method = "loess", se = FALSE) +
+  facet_wrap(~ genome) +
+  labs(x = "Relative position", y = "Recombination rate") +
+  theme_classic(),
+ncol = 1, align = "v", common.legend = TRUE, legend = "bottom"
+)
+ggsave("plots/rel_pos_dist_telo_vs_rec_rate.pdf", width = 12, height = 16)
+
+
+#Check if median rec rate per chromosome is correlate with chromosome lenght and if the chromosome status is relevant for this correlation
+
+pdf("plots/rec_rate_chr_length.pdf", width = 8, height = 6)
+ggplot(wide_df %>% group_by(genome, chr) %>% summarise(median_rec_rate = median(Recombination_rate, na.rm = TRUE),
+                                                        chr_length = first(chr_length),
+                                                        chr_status = first(chr_status)),
+       aes(x = chr_length, y = median_rec_rate, color = chr_status)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top") +
+  labs(x = "Chromosome length", y = "Median recombination rate") +
+  theme_classic()
+
+dev.off()
+```
+
+
+```{r rel_position_effects}
+
+
+pdf("plots/gam_marginal_effects_rr_rel_pos_reduced.pdf", width = 8, height = 8)
+plot_predictions(gam1, variables = "rel_position_z", 
+  condition = c("rel_position_z", "genome", "chr_status"), 
+  type = "response") +
+  labs(x = "Relative position, scaled", y = "Effect on recombination rate",
+       title = "Marginal effects of rel_position_z on recombination rate")
+dev.off()
+
+# plot derivative of the smooth term for rel_position_z
+
+pdf("plots/gam_marginal_effects_rr_rel_pos_reduced_derivative.pdf", width = 8, height = 8)
+plot_slopes(gam1, variables = "rel_position_z", 
+  condition = c("rel_position_z", "genome", "chr_status"), 
+  type = "response") + 
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Relative position, scaled", y = "1st derivative of effect on recombination rate",
+       title = "Marginal effects of rel_position_z on recombination rate")
+dev.off()
+
+
+
+########## Not run
+
+# Derivative of the smooth for rel_position_z
+deriv_rel <- derivatives(gam1, term = "s(rel_position_z)", n = 500)
+
+
+# Where derivative confidence interval includes 0 = slope not different from flat
+asymptote_region <- deriv_rel %>%
+  filter(.lower_ci < 0 & .upper_ci > 0)   # CI includes zero = plateau
+
+cat("Asymptote region (z-score):", range(asymptote_region$rel_position_z), "\n")
+
+# Back-transform to original scale if needed
+rel_pos_mean <- mean(wide_df$rel_position, na.rm = TRUE)
+rel_pos_sd   <- sd(wide_df$rel_position, na.rm = TRUE)
+cat("Asymptote region (original scale):", 
+    range(asymptote_region$rel_position_z) * rel_pos_sd + rel_pos_mean, "\n")
+
+pred_rel <- predictions(gam1, newdata = datagrid(rel_position_z = seq(min(wide_df$rel_position_z, na.rm=TRUE), 
+                                                                        max(wide_df$rel_position_z, na.rm=TRUE), 
+                                                                        length.out = 200)))
+
+p1 <- ggplot(pred_rel, aes(x = rel_position_z, y = estimate)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2) +
+  labs(x = "rel_position_z", y = "Recombination rate") +
+  theme_classic()
+
+p2 <- ggplot(deriv_rel, aes(x = rel_position_z, y = .derivative)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  labs(x = "rel_position_z", y = "Slope") +
+  theme_classic()
+
+
+p1 / p2
+ggsave("plots/rel_position_asymptote.pdf", width = 8, height = 8)
+
+```
+
+
+```{r dist_telomere_effects}
+# replace rel_position with dist_telomere in the GAM to see if the distance to telomere has a non-linear effect on recombination rate, and if there is an asymptote
+
+wide_df$chr_f <- factor(paste(wide_df$genome, wide_df$chr, sep = "_"))
+
+gam_dist_tel <- gam(
+  Recombination_rate ~ 
+    break_status + chr_status +
+    s(genome, bs = "re") +
+    s(GC_z) + s(LINE_z) + s(LTR_z) + s(Overlapping_z) + 
+    s(Unknown_z) + s(eig_scores_z) + s(dist_telomere_z) +
+    s(chr_length_z),
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam_dist_tel)
+gam.check(gam_dist_tel)
+
+gam_dist_tel_lin <- gam(
+  Recombination_rate ~ 
+    break_status + chr_status +
+    s(genome, bs = "re") +
+    s(GC_z, k=1) + s(LINE_z) + s(LTR_z, k=1) + s(Overlapping_z) + 
+    s(Unknown_z) + s(eig_scores_z) + s(dist_telomere_z) +
+    s(chr_length_z),
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam_dist_tel_lin)
+gam.check(gam_dist_tel_lin)
+
+
+
+```
+
+
+```{r dist_telomere_effects_asymtote}
+# Derivative of the smooth for dist_telomere_z
+deriv_mb <- derivatives(gam_dist_tel, term = "s(dist_telomere_z)", n = 500)
+deriv_rel <- derivatives(gam1, term = "s(rel_position_z)", n = 500)
+
+
+# Where derivative confidence interval includes 0 = slope not different from flat
+asymptote_region_mb <- deriv_mb %>% filter(.lower_ci < 0 & .upper_ci > 0)   # CI includes zero = plateau
+asymptote_region_rel <- deriv_rel %>% filter(.lower_ci < 0 & .upper_ci > 0)   # CI includes zero = plateau
+
+cat("Asymptote region (z-score):", range(asymptote_region_mb$dist_telomere_z), "\n")
+cat("Asymptote region (z-score):", range(asymptote_region_rel$rel_position_z), "\n")
+
+# Back-transform to original scale if needed
+dist_telomere_mean <- mean(wide_df$dist_telomere, na.rm = TRUE)
+dist_telomere_sd   <- sd(wide_df$dist_telomere, na.rm = TRUE)
+cat("Asymptote region (original scale):", 
+    range(asymptote_region$dist_telomere_z) * dist_telomere_sd + dist_telomere_mean, "\n")
+
+pred_rel <- predictions(gam_dist_tel, newdata = datagrid(dist_telomere_z = seq(min(wide_df$dist_telomere_z, na.rm=TRUE), 
+                                                                        max(wide_df$dist_telomere_z, na.rm=TRUE), 
+                                                                        length.out = 200)))
+
+
+p1 <- ggplot(pred_rel, aes(x = dist_telomere_z, y = estimate)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2) +
+  labs(x = "dist_telomere_z", y = "Recombination rate") +
+  theme_classic()
+
+p2 <- ggplot(deriv_rel, aes(x = dist_telomere_z, y = .derivative)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  labs(x = "dist_telomere_z", y = "Slope") +
+  theme_classic()
+
+
+p1 / p2
+ggsave("plots/dist_telomere_asymptote.pdf", width = 8, height = 8)
+```
+
+
+```{r dist_telomere_effects_asymtote_chr}
+
+wide_df$chr_f <- factor(paste(wide_df$genome, wide_df$chr, sep = "_"))
+
+gam_telo_chr <- gam(
+  Recombination_rate ~
+    break_status + s(genome, bs = "re") +
+    s(GC_z) + s(LINE_z) + s(LTR_z) + s(Overlapping_z) +
+    s(Unknown_z) + s(eig_scores_z) + s(chr_length_z) +
+    s(dist_telomere_z, chr_f, bs = "fs"),  # random smooths per chromosome
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam_telo_chr)
+
+telo_mean <- mean(wide_df$dist_telomere, na.rm = TRUE)
+telo_sd   <- sd(wide_df$dist_telomere, na.rm = TRUE)
+
+# Get smooth estimates per chromosome from the factor smooth
+
+sm_est <- smooth_estimates(gam_telo_chr,
+                           smooth = "s(dist_telomere_z,chr_f)",
+                           n = 200) %>%
+  add_confint()
+
+# Numerical derivative per chromosome
+deriv_chr <- sm_est %>%
+  group_by(chr_f) %>%
+  arrange(dist_telomere_z) %>%
+  mutate(
+    d_dx            = c(diff(.estimate) / diff(dist_telomere_z), NA),
+    dist_telomere_bp = dist_telomere_z * telo_sd + telo_mean
+  ) %>%
+  filter(!is.na(d_dx))
+
+# Asymptote: first position where slope magnitude drops into the bottom 20%
+asymptotes_chr <- deriv_chr %>%
+  group_by(chr_f) %>%
+  mutate(flat_threshold = quantile(abs(d_dx), 0.2)) %>%
+  filter(abs(d_dx) < flat_threshold) %>%
+  summarise(
+    asym_start_bp = min(dist_telomere_bp),
+    asym_start_z  = min(dist_telomere_z),
+    .groups = "drop"
+  )
+
+print(asymptotes_chr)
+
+# Add genome info for species comparison (chr_f levels are per genome)
+asymptotes_chr <- asymptotes_chr %>%
+  left_join(wide_df %>% distinct(chr_f, genome, chr, chr_length), by = "chr_f")
+
+
+# Plot smooth curve per chromosome, with asymptote marked
+ggplot(sm_est %>% mutate(dist_telomere_bp = dist_telomere_z * telo_sd + telo_mean),
+       aes(x = dist_telomere_bp, y = .estimate)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci), alpha = 0.2) +
+  geom_vline(data = asymptotes_chr,
+             aes(xintercept = asym_start_bp), linetype = "dotted", colour = "blue") +
+  facet_wrap(~ chr_f, scales = "free_y") +
+  labs(x = "Distance to telomere (bp)", y = "Smooth effect on recombination rate") +
+  theme_classic()
+ggsave("plots/dist_telomere_smooth_per_chr.pdf", width = 16, height = 12)
+
+# plot the asymtote start as a function of chr size, to see if larger chromosomes have a longer region of increasing recombination rate from the telomere
+# plot the distance distribution of the asymptote start for all chromosomes, and see if there is a common distance from the telomere where the recombination rate starts to plateau
+# add text at median asymptote start distance to show the typical distance from the telomere where recombination rate starts to plateau
+
+
+ggarrange(
+      {
+      asym_filt <- asymptotes_chr %>% filter(asym_start_bp < 4e6)
+      med_asym  <- median(asymptotes_chr$asym_start_bp / 1e6)
+      ggplot(asym_filt, aes(x = asym_start_bp / 1e6)) +
+        geom_histogram(bins = 15, fill = "steelblue", colour = "black") +
+        geom_vline(xintercept = med_asym, linetype = "dashed", colour = "black") +
+        annotate("text", x = med_asym, y = Inf,
+                 label = paste0("Median: ", round(med_asym, 4), " Mb"),
+                 vjust = 2, hjust = -0.8, colour = "black") +
+        labs(x = "Asymptote start (Mb from telomere), outlier removed", y = "Count") +
+        theme_classic()
+    },
+
+    ggplot(asymptotes_chr, aes(x = chr_length/1e6, y = asym_start_bp/1e6)) +
+      geom_point(aes(colour = genome)) +
+      geom_smooth(method = "lm") +
+      stat_cor(method = "spearman", label.x.npc = "centre", label.y.npc = "top") +
+      labs(x = "Chromosome length (Mb)", y = "Asymptote start (Mb from telomere)") +
+      theme_classic(),
+
+    ncol = 2, align = "h"
+) 
+
+ggsave("plots/asymptote_start_distr_vs_chr_length.pdf", width = 10, height = 4)
+
+```
+
+
+```{r rel_pos_effects_asymtote_chr}
+
+wide_df$chr_f <- factor(paste(wide_df$genome, wide_df$chr, sep = "_"))
+
+gam_telo_chr <- gam(
+  Recombination_rate ~
+    break_status + s(genome, bs = "re") +
+    s(GC_z) + s(LINE_z) + s(LTR_z) + s(Overlapping_z) +
+    s(Unknown_z) + s(eig_scores_z) + s(chr_length_z) +
+    s(dist_telomere_z, chr_f, bs = "fs"),  # random smooths per chromosome
+  data   = wide_df,
+  method = "REML",
+  family = Gamma(link = "log")
+)
+
+summary(gam_telo_chr)
+
+telo_mean <- mean(wide_df$dist_telomere, na.rm = TRUE)
+telo_sd   <- sd(wide_df$dist_telomere, na.rm = TRUE)
+
+# Get smooth estimates per chromosome from the factor smooth
+
+sm_est <- smooth_estimates(gam_telo_chr,
+                           smooth = "s(dist_telomere_z,chr_f)",
+                           n = 200) %>%
+  add_confint()
+
+# Numerical derivative per chromosome
+deriv_chr <- sm_est %>%
+  group_by(chr_f) %>%
+  arrange(dist_telomere_z) %>%
+  mutate(
+    d_dx            = c(diff(.estimate) / diff(dist_telomere_z), NA),
+    dist_telomere_bp = dist_telomere_z * telo_sd + telo_mean
+  ) %>%
+  filter(!is.na(d_dx))
+
+# Asymptote: first position where slope magnitude drops into the bottom 20%
+asymptotes_chr <- deriv_chr %>%
+  group_by(chr_f) %>%
+  mutate(flat_threshold = quantile(abs(d_dx), 0.2)) %>%
+  filter(abs(d_dx) < flat_threshold) %>%
+  summarise(
+    asym_start_bp = min(dist_telomere_bp),
+    asym_start_z  = min(dist_telomere_z),
+    .groups = "drop"
+  )
+
+print(asymptotes_chr)
+
+# Add genome info for species comparison (chr_f levels are per genome)
+asymptotes_chr <- asymptotes_chr %>%
+  left_join(wide_df %>% distinct(chr_f, genome, chr, chr_length), by = "chr_f")
+
+
+# Plot smooth curve per chromosome, with asymptote marked
+ggplot(sm_est %>% mutate(dist_telomere_bp = dist_telomere_z * telo_sd + telo_mean),
+       aes(x = dist_telomere_bp, y = .estimate)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = .lower_ci, ymax = .upper_ci), alpha = 0.2) +
+  geom_vline(data = asymptotes_chr,
+             aes(xintercept = asym_start_bp), linetype = "dotted", colour = "blue") +
+  facet_wrap(~ chr_f, scales = "free_y") +
+  labs(x = "Distance to telomere (bp)", y = "Smooth effect on recombination rate") +
+  theme_classic()
+ggsave("plots/dist_telomere_smooth_per_chr.pdf", width = 16, height = 12)
+
+# plot the asymtote start as a function of chr size, to see if larger chromosomes have a longer region of increasing recombination rate from the telomere
+# plot the distance distribution of the asymptote start for all chromosomes, and see if there is a common distance from the telomere where the recombination rate starts to plateau
+# add text at median asymptote start distance to show the typical distance from the telomere where recombination rate starts to plateau
+
+
+ggarrange(
+      {
+      asym_filt <- asymptotes_chr %>% filter(asym_start_bp < 4e6)
+      med_asym  <- median(asymptotes_chr$asym_start_bp / 1e6)
+      ggplot(asym_filt, aes(x = asym_start_bp / 1e6)) +
+        geom_histogram(bins = 15, fill = "steelblue", colour = "black") +
+        geom_vline(xintercept = med_asym, linetype = "dashed", colour = "black") +
+        annotate("text", x = med_asym, y = Inf,
+                 label = paste0("Median: ", round(med_asym, 4), " Mb"),
+                 vjust = 2, hjust = -0.8, colour = "black") +
+        labs(x = "Asymptote start (Mb from telomere), outlier removed", y = "Count") +
+        theme_classic()
+    },
+
+    ggplot(asymptotes_chr, aes(x = chr_length/1e6, y = asym_start_bp/1e6)) +
+      geom_point(aes(colour = genome)) +
+      geom_smooth(method = "lm") +
+      stat_cor(method = "spearman", label.x.npc = "centre", label.y.npc = "top") +
+      labs(x = "Chromosome length (Mb)", y = "Asymptote start (Mb from telomere)") +
+      theme_classic(),
+
+    ncol = 2, align = "h"
+) 
+
+ggsave("plots/asymptote_start_distr_vs_chr_length.pdf", width = 10, height = 4)
+
+```
+
+
+```{r plot_ms}
+
+rec_com_df  <- combined_df_brp %>% filter(feature == "Recombination_rate" & !(chr %in% c("Z", "Z1", "Z2", "W", "W1", "W2"))) 
+
+textsize=12
+chr_ends <- 
+rec_com_df %>% filter(!is.na(chr_category)) %>%
+  ggplot(aes(rel_position, value)) +
+  #geom_point() +
+  geom_smooth(aes(colour = genome, linetype = chr_category), se = F) +
+    scale_x_continuous(name = "Relative distance from telomere") +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(0,6)) +
+  scale_linetype_manual(values = c("solid", "dashed"),
+                        labels = c("Collinear", "Rearranged"),
+                        name = "Chromosome category") +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia"))),
+                      guide = "none") +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=textsize),
+        legend.title = element_text(size=textsize),
+        axis.text = element_text(size=textsize),
+        axis.title = element_text(size=textsize),
+        )
+
+rec_brp <- 
+rec_com_df %>% filter(!closest_break_type %in% c("colinear", "shared_fission")) %>%
+  ggplot(aes(dist_bp_kb/1000000, value)) +
+  #geom_point() +
+  geom_smooth(aes(linetype = closest_break_type, colour = genome), se = F, linewidth = 1) +
+  scale_x_continuous(limits = c(0, 5),
+                     name = "Distance from rearrangement breakpoint (Mb)") +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(0,6)) +
+  scale_linetype_manual(values = c( "dotted","dashed", "solid"),
+                        labels = c("Fission", "Fission-fusion", "Fusion"),
+                        name = "Breakpoint") +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia"))),
+                      guide = "none") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=textsize),
+        legend.title = element_text(size=textsize),
+        axis.text = element_text(size=textsize),
+        axis.title = element_text(size=textsize),
+        )
+
+View(rec_com_df)
+
+fill_colors <- c(
+  "colinear.ilMecPoly1"   = "#2166AC", # Custom species color
+  "rearranged.ilMecPoly1" = "white",
+  "colinear.ilMecLysi212"   = "darkorange", # Custom species color
+  "rearranged.ilMecLysi212" = "white"
+)
+
+chr_med_rr <- rec_com_df %>% filter(feature == "Recombination_rate") %>% group_by(genome, chr, chr_length) %>% summarise(med_rec_rate=median(value)) %>% left_join(., chr_class) %>% filter(!is.na(chr_category))
+
+label_sp <- labeller(genome = c(ilMecPoly1 ="M. polymnia",
+                                   ilMecLysi212 = "M. lysimnia"))
+
+chr_rr_box <- chr_med_rr %>%
+    ggplot() +
+    geom_boxplot(aes(chr_category, med_rec_rate, fill = interaction(chr_category, genome), colour = genome), alpha = 0.6, outliers = F) +
+  geom_jitter(aes(chr_category, med_rec_rate, fill = interaction(chr_category, genome), colour = genome)) +
+  facet_wrap(~genome, strip.position = "bottom", labeller = label_sp) +  
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(2,6)) +
+  scale_fill_manual(
+    name = "Chromosome category",
+    values = fill_colors,
+    breaks = c("colinear.ilMecPoly1", "rearranged.ilMecPoly1"),
+    labels = c("Collinear","Rearranged")
+    ) +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia")))) +
+   annotate(geom = "text", label = "Adj.R[2] = 0.305\np < 0.001", 
+            #x = 5.5, y = 33, 
+           color = "black", 
+           #hjust = 0, 
+           size = 4) +
+  #coord_cartesian(clip = "off") +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text = element_text(size=textsize, face = "italic"),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=textsize),
+        legend.title = element_text(size=textsize),
+        axis.text.y = element_text(size=textsize),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size=textsize),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank()
+        )
+
+
+label_cat <- labeller(chr_category = c(colinear ="Collinear",
+                                   rearranged = "Rearranged"))
+
+chr_rr_point <- 
+  chr_med_rr %>%
+    ggplot(aes(chr_length/1000000, med_rec_rate)) +
+    geom_point(aes(fill = interaction(chr_category, genome), colour = genome), shape = 21, size = 6, stroke = 1) +
+  facet_wrap(~chr_category, labeller = label_cat) +  
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(2,6)) +
+  scale_fill_manual(
+    name = "Chromosome category",
+    values = fill_colors,
+    breaks = c("colinear.ilMecPoly1", "rearranged.ilMecPoly1"),
+    labels = c("Collinear","Rearranged")
+    ) +
+  scale_x_continuous(name = "Chromosome length (Mb)") +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia")))) +
+  guides(colour = guide_legend(
+    override.aes = list(
+      shape = 16        
+    )
+  )) +
+    ggnewscale::new_scale_colour() +
+    geom_text(aes(label = chr, colour = chr_category), show.legend = F) +
+   geom_smooth(method = "lm", colour = "black", se = F) +
+    scale_colour_manual(values = c("colinear" = "white", "rearranged" = "black")) +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        strip.background = element_rect(fill = "white", colour = "black"),
+        strip.text = element_text(size=textsize),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=textsize),
+        legend.title = element_text(size=textsize),
+        axis.text.y = element_text(size=textsize),
+        axis.text.x = element_text(size=textsize),
+        axis.title.y = element_text(size=textsize),
+        axis.title.x = element_text(size=textsize),
+        guides()) 
+
+
+
+
+rec_fig3 <- 
+ggarrange(
+  ggarrange(chr_ends + theme(legend.position = "inside",
+                             legend.position.inside = c(0.7, 0.2)), 
+          rec_brp  + theme(legend.position = "inside",
+                             legend.position.inside = c(0.7, 0.23)),
+          labels = c("A", "B")),
+  ggarrange(chr_rr_point, 
+          chr_rr_box + theme(plot.margin = margin(20, 5, 11, 5)), 
+          common.legend = T, legend = "top",
+          labels = c("C", "D")),
+  nrow = 2,
+  heights = c(1,1.2)
+)
+
+
+  ggarrange(ggarrange(feat_div_box, (end_plot + theme(plot.margin = margin(30, 5, 0, 5))),
+                                     nrow = 1, widths = c(1.5,1)),
+          ggarrange(rec_comp_plot + theme(plot.margin = margin(5, 5, 10, 5)), (brp_comp_plot + theme(plot.margin = margin(5, 5, 0, 5))), nrow = 1, widths = c(1.5,1)),
+          nrow = 2,
+          heights = c(1.8,1),
+          align = "v"
+          )
+  
+  ggarrange(
+    ggarrange(rec_fig3, 
+              ggarrange(rec_comp_plot + theme(plot.margin = margin(5, 5, 10, 5)), (brp_comp_plot + theme(plot.margin = margin(5, 5, 0, 5))), nrow = 1, widths = c(1,1),
+              labels = c("E","F")),
+              nrow = 2, heights = c(2,1)),
+    ggarrange(feat_div_box, (end_plot + theme(plot.margin = margin(30, 5, 0, 5))),
+              nrow = 1, widths = c(1,1), 
+              labels = c("G", "H")))
+
+  ggsave(filename = paste("plots/fig_3_", Sys.Date(), ".pdf", sep = ""),
+         height = 10,
+         width = 18)  
+
+  ggsave(filename = paste("plots/fig_3_", Sys.Date(), ".png", sep = ""),
+         height = 10,
+         width = 18)  
+```
+
+```{r}
+
+chr_med_rr
+
+summary(lm(med_rec_rate ~ chr_length*genome + chr_category*genome + chr_length*chr_category*genome, data = chr_med_rr))
+
+model_full <- lm(med_rec_rate ~ chr_length * genome * chr_category, data = chr_med_rr)
+summary(model_full)
+
+summary(lm(med_rec_rate ~ chr_length * chr_category, data = chr_med_rr %>% filter(genome == "ilMecPoly1")))
+
+summary(lm(med_rec_rate ~ chr_length * chr_category, data = chr_med_rr %>% filter(genome == "ilMecLysi212")))
+
+chr_med_rr$chr_length_mb <- chr_med_rr$chr_length/1000000
+
+mixed_model <- lmer(
+  med_rec_rate ~ chr_length_mb * chr_category + (1 + chr_length_mb | genome), 
+  data = chr_med_rr
+)
+
+library(lmerTest)
+library(performance)
+summary(simplified_mixed_model)
+# Use this simplified version only if the first model throws a warning
+simplified_mixed_model <- lmer(med_rec_rate ~ chr_length_mb * chr_category + (1 | genome), data = chr_med_rr)
+
+model_performance(simplified_mixed_model)
+
+```
+

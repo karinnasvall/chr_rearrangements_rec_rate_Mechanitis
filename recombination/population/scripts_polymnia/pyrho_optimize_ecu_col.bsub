@@ -1,0 +1,61 @@
+#!/bin/bash
+#BSUB -M 25000
+#BSUB -R "select[mem>25000] rusage[mem=25000] span[hosts=1]"
+#BSUB -n 10
+#BSUB -q week
+#BSUB -J pyrho_op[1-16]
+#BSUB -o log/pyrho_op_lsf.%J.%I.out
+#BSUB -e log/pyrho_op_lsf.%J.%I.err
+
+CHROM=$(sed -n -e ${LSB_JOBINDEX}p list_chrom.txt)
+
+SPECIES=polymnia
+POP=ecu_col
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/pyrho/${SPECIES}
+
+FILTERED_VCF_DIR=${WD}/filtered_vcfs_${POP}
+OUTPUT_DIR=${WD}/output_optimize_${POP}
+POP_LIST=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/demographic_inference/${SPECIES}/lists/list_pop_${POP}.txt
+cut -f1 -d" " $POP_LIST > ${WD}/list_ind_${POP}.txt 
+
+# for vcf filtering
+F_MISS=0.1
+# present in at least 2 haplotypes in the sample
+MAF=0.01 
+
+# for pyrho, from pyrho hyperparam
+BLOCKPENALTY=30 
+WINDOWSIZE=40
+
+VCF_FILE=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/rawdata_to_vcf/04_vcf_filtering/${SPECIES}/02_filtered_vcfs/${CHROM}.call.MQ_BQ20.vcf_filtered.vcf.gz
+
+#load modules
+ml pyrho/0.2.1-c3 bcftools/1.20--h8b25389_0
+
+
+mkdir $FILTERED_VCF_DIR
+mkdir $OUTPUT_DIR
+
+echo "Processing $VCF_FILE"
+
+# get the sample name from the list of individuals 
+bcftools query -l $VCF_FILE |grep -f ${WD}/list_ind_${POP}.txt > ${WD}/list_samples_${POP}.txt
+
+KEEP_SAMPLES=${WD}/list_samples_${POP}.txt
+
+# filtering for missingness and maf, and keeping only samples in the population
+bcftools view --threads 4 -S $KEEP_SAMPLES $VCF_FILE | bcftools view -i "F_MISSING<$F_MISS & MAF>$MAF" -Oz -o ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.gz
+
+echo "Indexing ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.gz"
+bcftools index ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.gz
+bcftools stats -s - ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.gz > ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.stats
+
+echo "Running pyrho optimize for ${POP} ${CHROM}"
+pyrho optimize --numthreads 10 --ploidy 2 \
+	--tablefile ${WD}/lookup_table/${POP}_lookup.hdf \
+	--vcffile ${FILTERED_VCF_DIR}/${POP}_${CHROM}_fmiss${F_MISS}_maf${MAF}.vcf.gz \
+	--outfile ${OUTPUT_DIR}/${SPECIES}_${POP}_${CHROM}.rmap \
+	--blockpenalty $BLOCKPENALTY --windowsize $WINDOWSIZE \
+	--logfile ${OUTPUT_DIR}/${SPECIES}_${POP}_${CHROM}_rmap.log
+
+

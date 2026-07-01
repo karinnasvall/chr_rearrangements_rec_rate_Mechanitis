@@ -1,0 +1,74 @@
+#!/bin/bash
+#BSUB -M 8000
+#BSUB -R "select[mem>8000] rusage[mem=8000] span[hosts=1]"
+#BSUB -n 4
+#BSUB -q normal
+#BSUB -J mosdepth_cov[1-31]
+#BSUB -o log/mosdepth_cov.%J_%I.out
+#BSUB -e log/mosdepth_cov.%J_%I.err
+
+set -euo pipefail
+
+BAM_LIST=../../01_rawdata_to_vcf/02_mapping_polymnia/list_dedup_bam.txt
+OUTPUT_DIR=coverage_100kb
+WINDOW_SIZE=100000
+THREADS=4
+#for plotting
+FAI=../../../breakpoints/anc_reconstruction_pipeline_260609/results/01_genomes/ilMecPoly1_hap1.fa.fai
+
+if [[ ! -s "$BAM_LIST" ]]; then
+	echo "BAM list file is missing or empty: $BAM_LIST"
+	exit 1
+fi
+
+mkdir -p log "$OUTPUT_DIR/per_sample"
+
+ml mosdepth/0.3.8--hd299d5a_0
+
+mapfile -t BAMS < <(grep -Ev '^\s*$|^\s*#' "$BAM_LIST")
+TOTAL_BAMS="${#BAMS[@]}"
+
+if [[ "$TOTAL_BAMS" -eq 0 ]]; then
+	echo "No BAM paths found in $BAM_LIST"
+	exit 1
+fi
+
+if [[ -z "${LSB_JOBINDEX:-}" ]]; then
+	echo "LSB_JOBINDEX is not set. Submit this script as an LSF array job."
+	exit 1
+fi
+
+IDX=$((LSB_JOBINDEX - 1))
+if (( IDX < 0 || IDX >= TOTAL_BAMS )); then
+	echo "Array index ${LSB_JOBINDEX} is outside the BAM list range (1-${TOTAL_BAMS})."
+	exit 1
+fi
+
+BAM_PATH="${BAMS[$IDX]}"
+if [[ ! -f "$BAM_PATH" ]]; then
+	echo "BAM file not found: $BAM_PATH"
+	exit 1
+fi
+
+SAMPLE_NAME="$(basename "$BAM_PATH")"
+SAMPLE_NAME="${SAMPLE_NAME%.bam}"
+PREFIX="$OUTPUT_DIR/per_sample/$SAMPLE_NAME"
+
+echo "[$(date)] Processing sample $((IDX + 1))/${TOTAL_BAMS}: $SAMPLE_NAME"
+echo "BAM: $BAM_PATH"
+echo "Window size: $WINDOW_SIZE"
+
+mosdepth \
+	--threads "$THREADS" \
+	--by "$WINDOW_SIZE" \
+	--no-per-base \
+	"$PREFIX" \
+	"$BAM_PATH"
+
+echo "[$(date)] Done: ${PREFIX}.regions.bed.gz"
+
+
+# run when all samples are done to create a combined coverage plot
+python ~/scripts/recombination/population_data_processing/plot_coverage_all_samples.py --coverage-dir $OUTPUT_DIR/per_sample --fai $FAI --output-png $OUTPUT_DIR/coverage.png --output-individual-tsv $OUTPUT_DIR/coverage_ind.tsv --output-tsv $OUTPUT_DIR/coverage_median.tsv --title "Coverage windows of $WINDOW_SIZE bp"
+
+#Overlay coverage from many mosdepth samples on one reference genome axis.

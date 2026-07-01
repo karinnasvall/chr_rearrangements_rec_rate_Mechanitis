@@ -1,0 +1,15 @@
+#!/bin/bash
+#BSUB -J trimming
+#BSUB -o script_trimming-%I-%J.output
+#BSUB -e script_trimming-%I-%J.error
+#BSUB -n 1
+#BSUB -M 1000
+#BSUB -R "select[mem>1000] rusage[mem=1000] span[hosts=1]"
+#BSUB -q oversubscribed
+
+ml nextflow/25.10.0-10289 
+module load singularityce-4.1.0/python-3.11.6 
+
+#nextflow run main.nf --dry-run
+nextflow run main.nf
+#nextflow run main.nf -resume

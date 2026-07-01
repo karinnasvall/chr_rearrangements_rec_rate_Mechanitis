@@ -1,0 +1,795 @@
+---
+title: "Syngraph parameter test"
+author: "Karin Nasvall"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: preview
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r library, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(ggpubr)
+library(phytools)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install(version = "3.17")
+#
+#BiocManager::install("ggtree")
+library(ggtree)
+library(ggforce)
+#for inserting images
+#BiocManager::install("EBImage")
+#library(EBImage)
+#install.packages("ggimage")
+
+library(ggimage)
+library(ape)
+library(treeio)
+
+source("~/scripts/comp_gen_scripts_working/06_syngraph/syngraph_functions.R")
+```
+
+```{r get_correct_tree}
+
+tree_bl <- read.tree("../tree_pnas_mech_nucl.txt")
+plot(tree_bl)
+tiplabels()
+tree_bl$tip.label
+keep_species <- c("Mon_2012_244_Mech-messenoides-messenoides_Ec-WA", 
+ "CAM071976_Mech-polymnia-chimborazona_Ec-WEST",
+ "CAM028331_Mech-polymnia-dorissides_Ec-WA",
+ "Sal_1416_Mech-polymnia-dorissides_Col-WA",
+ "CAM028192_Mech-lysimnia-roqueensis_Ec-WA",
+ "CAM028198_Mech-lysimnia-roqueensis_Ec-WA",
+ "CAM008476_Mech-macrinus-macrinus_Pan-WEST",
+ "Mon_2012_197_Mech-mazaeus-fallax_Ec-WA",
+ "CAM070759_Mech-menapis-mantineus_Ec-WEST",
+"CAM070479_For-proceris_Ec-WA")
+
+tree_pruned <- keep.tip(tree_bl, keep_species)
+plot(tree_pruned)
+nodelabels()
+tiplabels()
+
+tree_pruned <- reroot(tree_pruned, node.number = 7 , position = 0.02)
+plot(tree_pruned)
+nodelabels()
+
+ggtree(tree_pruned) +
+  geom_nodelab() +
+  geom_tiplab() +
+  xlim(c(0,0.1))
+
+
+tree_pruned$tip.label <- c("ilMecMess1", "ilMecPoly75","ilMecPoly1", "ilMecPoly126", "ilMecLysi317", "ilMecLysi212", "ilDanPlex1",  "ilMecMacr1",   "ilMecMaza1","ilMecMena1" )
+
+write.tree(tree_pruned, file = "tree_pnas_pruned.txt")
+
+tree_pruned$tip.label
+[1] "Mon_2012_244_Mech-messenoides-messenoides_Ec-WA"
+[2] "CAM071976_Mech-polymnia-chimborazona_Ec-WEST"   
+[3] "CAM028331_Mech-polymnia-dorissides_Ec-WA"       
+[4] "Sal_1416_Mech-polymnia-dorissides_Col-WA"       
+[5] "CAM028192_Mech-lysimnia-roqueensis_Ec-WA"       
+[6] "CAM070479_For-proceris_Ec-WA"                   
+[7] "CAM008476_Mech-macrinus-macrinus_Pan-WEST"      
+[8] "Mon_2012_197_Mech-mazaeus-fallax_Ec-WA"         
+[9] "CAM070759_Mech-menapis-mantineus_Ec-WEST"
+
+```
+
+
+```{r set_vars, include=FALSE}
+# path to the output from Syngraph (https://github.com/DRL/syngraph)
+
+
+syngraph_input_prefix="../results/04_syngraph/syngraph_out/syngraph_m"
+
+param_range=5:40
+
+param_prefix = syngraph_input_prefix
+
+```
+
+## Number of inferred ancestral chromosomes per node for parameter r=x
+```{r get_cluster_data}
+
+cluster_all <- get_cluster_all(prefix = syngraph_input_prefix, param_range = param_range)
+cluster_all
+
+```
+
+
+```{r plot_cluster_data}
+#plot all
+plot_linkage_clusters(cluster_all %>% filter(!str_detect(V2, "il")), height = 24)
+
+```
+
+
+
+```{r get_rearrangement_data, include=FALSE}
+
+rearr_all <- get_rearrangement_table(param_prefix = syngraph_input_prefix, file_prefix = "infer_m", param_range = param_range)
+
+```
+
+
+```{r get nr_markers}
+
+nr_markers <- get_nr_markers(prefix=syngraph_input_prefix,
+               file_prefix = "infer_m",
+               param_range = param_range)
+
+
+chr_per_param <- 
+nr_markers %>%
+  group_by(node, param_nr) %>%
+  # want both the number of markers and the number of chromosomes per node and parameter, so count the number of unique chromosomes per node and parameter
+  summarise(Chr_nr = n(), Total_markers = sum(n)) %>% ungroup()
+
+write.csv(chr_per_param, file = paste("tables/chr_per_param", Sys.Date(), ".csv", sep = ""),
+          quote = F, row.names = F)
+
+
+chr_per_param %>% filter(!stringr::str_detect(node, "il")) %>%
+  mutate(Total_markers = Total_markers/200)   %>%
+  pivot_longer(c(Total_markers, Chr_nr), names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = as.numeric(param_nr), y = value, colour = metric)) +
+  geom_point(size = 2) +
+  geom_line() +
+  facet_wrap(~node, scales = "free_y") +
+  scale_colour_manual(values = c(Total_markers = "steelblue", Chr_nr = "tomato"),
+                      labels = c(Total_markers = "Markers", Nr_chr = "Chromosomes")) +
+  labs(x = "Parameter m", y = "Count", colour = NULL) +
+  theme_classic() +
+  theme(panel.grid.major = element_line(colour = "darkgrey"))
+
+
+ggsave(filename = paste("plots/chr_per_param", Sys.Date(), ".pdf", sep = ""),
+       height = 24,
+       width = 24)
+
+
+```
+
+## Number of inferred fussions/fission per node for parameter r=x
+
+```{r plot_rearrangement_data, include=FALSE}
+
+plot_rearrangements_param(rearr_all, width = 16, height = 24)
+
+```
+
+
+
+## Plot syngraph result on the tree
+```{r plot_rearrangement_on_tree}
+
+source("~/scripts/comp_gen_scripts_working/06_syngraph/syngraph_functions.R")
+
+# obs has to be the tree with node labels as in the rearrangement table (n1, n2, etc)
+tree <- read.newick(paste(syngraph_input_prefix, "05/infer_m05.newick.txt", sep = ""))
+
+anc_busco <- read.table(file = "/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/odp_ms_mec-hap1/outgroup_elements_db12.tsv", header = T, sep = "\t")  
+
+anc_colours <- read.table("/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/odp_ms_mec-hap1/list_anc_colour_rainbow.txt",
+                          header = FALSE, sep = "\t",
+                          col.names = c("anc_element", "anc_colour"), comment.char = "")
+
+
+anc_palette <- anc_colours$anc_colour
+names(anc_palette) <- anc_colours$anc_element
+
+
+plot_syngraph_tree_features_chr_painting(tree, rearr_all, chr_per_param = chr_per_param, 
+                                        param_values = 40, 
+                                        out_prefix = "plots/Syngraph_clado_param", 
+                                        rearr_ylim = c(0, 30),
+                                        plot_xlim =  c(0,8),
+                                        plot_ylim =  c(0,20),
+                                        bar_cols = c("goldenrod", "tan4"),
+                                        legend_plot = NULL,
+                                        anc_busco = anc_busco,
+                                        param_prefix = syngraph_input_prefix,
+                                        anc_colours = anc_colours
+                                        )
+```
+
+
+
+```{r chr_painting}
+
+param_values=c(5, 10, 20, 30, 40)
+
+for (i in stringr::str_pad(param_values, 2, pad = "0")) {
+
+link_long <- get_link_long(i = i, anc_busco = anc_busco, param_prefix = param_prefix, tree = tree)
+
+link_long %>% filter(!is.na(anc_element)) %>%
+  ggplot() +
+  geom_bar(aes(x = tidytext::reorder_within(chr, -n, Node), fill = anc_element), stat = "count") +
+  facet_wrap(~Node, ncol = 4, scales = "free_x") +
+  tidytext::scale_x_reordered() +
+  scale_fill_manual(values = anc_palette) +
+  theme_classic()
+
+ggsave(filename = paste("plots/chr_painting_", i, ".pdf", sep = ""),
+       height = 16,
+       width = 8)
+
+}
+
+```
+
+
+```{r plot_agora}
+# prepare a link file from the output of agora, with columns: Node, chr, anc_element
+# in files from the output directory of agora, they are compressed with bgzip, so can be read with read.table with the appropriate file path and compression argument
+agora_dir="../results/05_agora/output/agora_output/ancGenomes/basic-workflow/"
+
+# read in all th files in the directory that end with .list.bz2
+agora_files <- list.files(agora_dir, pattern = "*.list.bz2", full.names = TRUE)
+
+agora_link_df <- do.call(rbind, lapply(agora_files, function(file) {
+  df <- read.table(bzfile(file), header = FALSE, sep = "\t", comment.char = "")
+  df$Node <- gsub("ancGenome\\.|.list\\.bz2", "", basename(file))
+  colnames(df) <- c("chr", "start", "end", "strand", "info", "Node")
+  return(df[, c("chr", "start", "end", "strand", "Node", "info")])
+}))
+
+head(agora_link_df)
+length(agora_link_df$Node)
+
+#parse the info column to extract gene_id, species, chr, position
+# keep the first string before space in column info (node and gene identifying that we can use to merge the df later)
+agora_link_df$node_gene <- sapply(strsplit(agora_link_df$info, " "), function(x) x[1])
+
+#make a new df where one column is the first part (node_gene) and one column all the rest of the info (species, chr, position) split by space and set in a long format
+# where node_gene is one column and the rest of the info is another column, so we can merge with the link_long table from syngraph later
+
+df_long <- agora_link_df %>% select(node_gene, info) %>%
+  separate_rows(info, sep = " ") %>% filter(info != node_gene) %>%
+  separate(info, into = c("Node", "new_info"), sep = "\\.") %>%
+  mutate(
+    geneid = sub("_.*", "\\1", new_info),
+    chr     = sub("_.*", "", sub(".*SUPER_", "\\1", new_info)),
+    pos     = sub(".*_", "\\1", new_info)
+  ) %>% separate(pos, into = c("start", "end"), sep = "-", convert = TRUE) %>% 
+  mutate(strand = NA) %>% 
+  select(node_gene, chr, start, end, strand, Node, geneid)
+
+head(df_long)
+
+agora_link_parsed <- agora_link_df %>% select(node_gene, chr, start, end, strand, Node) %>%
+  left_join(df_long %>% select(node_gene, geneid), by = "node_gene") %>%
+  mutate(chr = sub("CAR_", "", chr)) %>%
+  rbind(df_long) %>% select(-node_gene) %>% distinct()
+
+agora_link_parsed$chr <- clean_chr(agora_link_parsed$chr)
+
+head(agora_link_parsed)
+str(agora_link_parsed)
+
+
+fai_files <- list.files("../results/01_genomes/", pattern = "*hap1.fa.fai", full.names = TRUE)
+read_fai <- function(file) {
+  df <- read.table(file, header = FALSE, sep = "\t", comment.char = "")[,1:2]
+  colnames(df) <- c("chr", "length")
+  df$species <- gsub("_hap1.fa.fai", "", basename(file))
+  return(df)
+}
+
+chr_length_agora <- do.call(rbind, lapply(fai_files, read_fai)) %>% select(species, chr, length) %>%
+  mutate(chr = clean_chr(chr)) %>%
+  rename(Node = species)
+
+agora_link_parsed <- left_join(agora_link_parsed, chr_length_agora, by = c("Node", "chr")) %>% left_join(., anc_busco, by = "geneid") %>% filter(!is.na(anc_element))
+
+chr_per_node_and_markers <- agora_link_parsed %>% group_by(Node, chr) %>% summarise(n = n()) 
+
+write.csv(chr_per_node_and_markers, file = paste("tables/chr_per_node_agora.csv", sep = ""),
+          quote = F, row.names = F)
+
+# check small chromosomes with few markers (N0 contains >100 of small chr)
+chr_per_node_and_markers %>% filter(n < 50)
+chr_per_node_and_markers %>% filter(Node != "N0") %>% summary()
+
+
+# remove chr containing fewer than 50 markers for the rest of the analysis
+agora_link_parsed <- agora_link_parsed %>% left_join(chr_per_node_and_markers, by = c("Node", "chr")) %>% filter(n >= 50)
+
+agora_link_parsed %>% filter(!is.na(anc_element)) %>% 
+  ggplot() +
+  # plt a base rectagle for the chromsome, ymin is 0 and ymax is the lenght of the chromosome
+  geom_rect(aes(x = chr, width = 0.9, ymin = 0, ymax = length), fill = "transparent", colour = "grey70") +
+  geom_rect(aes(x = chr, width = 0.8, ymin = start, ymax = end, fill = anc_element, colour = anc_element)) +
+  facet_wrap(~Node, ncol = 4, scales = "free") +
+  tidytext::scale_x_reordered() +
+  scale_fill_manual(values = anc_palette) +
+  scale_colour_manual(values = anc_palette) +
+  theme_classic()
+
+
+ggsave(filename = paste("plots/chr_painting_agora.pdf", sep = ""),
+       height = 16,
+       width = 8)
+
+
+# reconcile nodes agora and syngraph (check the trees)
+node_liftover <- data.frame(
+  Node =          c("N0", "N1", "N3", "N6", "N7", "N8", "N2", "N4", "N5"),
+  syngraph_node = c("n0", "n1", "n4", "n7", "n8", "n14", "n3", "n5", "n6")
+)
+
+# make new column in agora_link_parsed with the syngraph node names based on the node_liftover table
+agora_link_parsed <- agora_link_parsed %>% left_join(node_liftover, by = c("Node" = "Node")) %>% rename(agora_node = Node) %>% rename(Node = syngraph_node)
+# add the tipnodes to the new Node column from the agora_node column
+agora_link_parsed <- agora_link_parsed %>% mutate(Node = ifelse(is.na(Node), agora_node, Node))
+
+agora_link_parsed <- dplyr::inner_join(
+    agora_link_parsed, 
+    data.frame(Node = c(tree$tip.label, tree$node.label), node = seq(1, length(c(tree$tip.label, tree$node.label))))
+  )
+head(agora_link_parsed)
+
+write.csv(agora_link_parsed, file = paste("tables/agora_link_parsed.csv", sep = ""),
+          quote = F, row.names = F)
+# flip chromosomes orientation based on strand information in full table busco files
+
+# if a chr have a mode of negative strand, flip the start and end positions of the rectangles for that chromosome in the plot
+# readin from buscodirectory
+
+busco_dir <- "../results/02_busco/"
+
+files <- list.files(busco_dir, pattern = "full_table.*\\hap1.tsv", full.names = TRUE, recursive = TRUE)
+
+busco_full_tables <- do.call(rbind, lapply(files, function(file) {
+  df <- read.csv(file, header = FALSE, sep = "\t", skip = 3, fill = TRUE)[,1:6]
+  df$genome <- sub(".hap1.tsv", "", sub("full_table_", "", basename(file)))
+  return(df)
+}))
+
+busco_full_tables <- busco_full_tables %>% rename(geneid = V1, status = V2, chr = V3, start = V4, end = V5, strand = V6) %>%
+  filter(status == "Complete") %>% select(-status) %>% mutate(chr = clean_chr(chr))
+
+head(busco_full_tables)
+
+# get length of inferred chr
+length_anc_nodes <- agora_link_parsed %>% group_by(Node, chr) %>% summarise(length_max = max(end)) %>% ungroup() %>% filter(!is.na(Node))
+agora_link_parsed <- agora_link_parsed %>% left_join(length_anc_nodes, by = c("Node", "chr")) %>% mutate(length = case_when(is.na(length) ~ length_max, TRUE ~ length)) 
+
+
+agora_link_parsed <- agora_link_parsed %>% left_join(busco_full_tables %>% 
+      select(genome, chr, geneid, strand), by = c("Node" = "genome", "chr" = "chr", "geneid" = "geneid")) %>% 
+      mutate(strand.x = case_when(is.na(strand.x) ~ as.character(strand.y), TRUE ~ as.character(strand.x))) 
+
+agora_link_parsed <- agora_link_parsed %>% select(-strand.y) %>% rename(strand = strand.x) %>%
+  mutate(strand = case_when(
+    strand == "-1" ~ "-",
+    strand == "1"  ~ "+",
+    TRUE           ~ strand
+  ))
+head(agora_link_parsed)
+
+# if strand mode per chr is negative, flip the start and end positions 
+
+#change orientation if majority is on negative strand 
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+chain_1 <- agora_link_parsed
+
+
+chain_1$start_init <- chain_1$start
+chain_1$end_init <- chain_1$end
+
+for (genome in unique(chain_1$Node)) {
+  for (chr in unique(chain_1[chain_1$Node==genome, "chr"])) {
+    if (Mode(chain_1[chain_1$Node==genome & chain_1$chr==chr, "strand"])=="-") {
+      print(paste(genome, chr))
+      
+      chain_1[chain_1$Node==genome & chain_1$chr==chr, "end"] <- chain_1[chain_1$Node==genome & chain_1$chr==chr, "length"] - chain_1[chain_1$Node==genome & chain_1$chr==chr, "start"]
+      
+      chain_1[chain_1$Node==genome & chain_1$chr==chr, "start"] <- chain_1[chain_1$Node==genome & chain_1$chr==chr, "length"] - chain_1[chain_1$Node==genome & chain_1$chr==chr, "end_init"]
+      
+      chain_1[chain_1$Node==genome & chain_1$chr==chr & chain_1$strand=="-", "strand"] <- "temp"
+      chain_1[chain_1$Node==genome & chain_1$chr==chr & chain_1$strand=="+", "strand"] <- "-"
+      chain_1[chain_1$Node==genome & chain_1$chr==chr & chain_1$strand=="temp", "strand"] <- "+"
+    }
+  }
+}
+
+
+write.csv(chain_1, file = paste("tables/agora_link_parsed_flipped.csv", sep = ""),
+          quote = F, row.names = F)
+
+
+chain_1 <- read.csv(file = "tables/agora_link_parsed_flipped.csv")
+
+source("~/scripts/comp_gen_scripts_working/06_syngraph/syngraph_functions.R")
+
+plot_syngraph_tree_features_chr_painting_one_plot(tree, rearr_all, chr_per_param, param_values = 5, 
+                                        out_prefix = "plots/Syngraph_clado_agora_test", 
+                                        rearr_ylim = c(0, 30),
+                                        plot_xlim =  c(0,8),
+                                        plot_ylim =  c(0,20),
+                                        bar_cols = c("goldenrod", "tan4"),
+                                        legend_plot = NULL,
+                                        anc_busco = anc_busco,
+                                        param_prefix = param_prefix,
+                                        anc_colours = anc_colours,
+                                        agora = TRUE,
+                                        link_df = chain_1
+                                        )
+```
+
+
+
+
+```{r plot_agora}
+# "ilDanPlex1"   "ilMecMacr1"   "ilMecMaza1"   "ilMecMess1"   "ilMecMena1"   "ilMecLysi317"
+# [7] "ilMecLysi212" "ilMecPoly75"  "ilMecPoly1"   "ilMecPoly126"
+
+
+
+new_data <- data.frame(child=c("ilDanPlex1", "ilDanPlex1"),X.parent=c("n0","n0"), event=c("fusion","fission"), param_nr=c("05", "05"), rearr=c(1, 0))
+rearr_all <- rbind(new_data, rearr_all)
+
+
+new_data_chr <- data.frame(node="n0", param_nr="05", Chr_nr=31, Total_markers=0)
+chr_per_param <- rbind(new_data_chr,chr_per_param)
+
+# add agora result
+chr_per_param <- chr_per_param %>% mutate(Chr_nr=case_when(node == "n1" & param_nr == "05" ~ 16,
+                                                           TRUE ~ Chr_nr))
+
+# add n0 to tree
+tree$node.label[1] <- "n0"
+
+# 2. Create a dataframe with the exact original tip labels and your desired new labels
+species_name_labels <- data.frame(
+  label = c(tree$tip.label), 
+  species_name = c("Mechanitis messenoides", "Mechanitis menapis", "Mechanitis macrinus", "Mechanitis mazaeus", "Mechanitis polymnia (EcWest)", "Mechanitis polymnia (Col)", "Mechanitis polymnia (EcEast)", "Mechanitis lysimnia", "Mechanitis lysimnia", "Danaus plexippus")
+)
+
+plot_syngraph_tree_features_ms(tree, rearr_all, chr_per_param, param_values = 5, 
+                                        out_prefix = "plots/Syngraph_clado_agora_ms_260630", 
+                                        rearr_ylim = c(0, 90),
+                                        plot_xlim =  c(-0.001,0.055),
+                                        # plot_ylim =  c(0,10),
+                                        bar_cols = c("goldenrod", "tan4"),
+                                        legend_plot = NULL,
+                                        anc_busco = anc_busco,
+                                        param_prefix = param_prefix,
+                                        anc_colours = anc_colours,
+                                        agora = TRUE,
+                                        link_df = chain_1 %>% filter(!Node %in% c("n0", "n1", "n2", "n4", "n7", "n8", "n14", "n3", "n5", "n6")),
+                                        species_name_labels = species_name_labels,
+                               text_size=8)
+
+
+ggtree(tree, ladderize = TRUE, layout = "rectangular", right = TRUE, linewidth = 1) +
+      geom_tiplab(size = text_size, #offset = 0.1,
+                  align = FALSE, #nudge_x = 0, nudge_y = -0.1, 
+                  fontface = "italic")
+
+
+
+rearr_all %>% filter(param_nr=="05")
+
+
+```
+
+
+```{r get_min_fus_fis_merian}
+
+summary_blocks_filt <- 
+chain_1 %>%
+filter(!is.na(anc_element)) %>%
+group_by(Node, anc_element) %>%
+count(Node, chr) %>%
+filter(n>1) %>%
+ungroup()
+
+#fusions and fissions in same plot
+fusions_count <- 
+summary_blocks_filt %>%
+count(Node, chr)
+
+fusions_count$type <- "fusions"
+View(fusions_count)
+
+fissions_count <- 
+summary_blocks_filt %>%
+count(Node, anc_element)
+
+fissions_count$type <- "fissions"
+fissions_count$chr <- fissions_count$anc_element
+
+fission_fusion_blocks <- rbind(fissions_count[,c(1,5,3,4)], fusions_count) %>% 
+  filter(!is.na(chr))
+
+#number of events minus the ancestral block
+fission_fusion_blocks$event <- fission_fusion_blocks$n - 1
+
+write.csv(fission_fusion_blocks, file = paste(output_path, "tables/fission_fusion_merian", Sys.Date(), ".tsv", sep = ""), quote = F, row.names = F)
+
+fission_fusion_barplot <- 
+fission_fusion_blocks %>%
+  group_by(Node, type) %>% 
+  summarise(sum_type = sum(event)) %>%
+  ggplot() +
+geom_point(aes(Node, sum_type, shape=type, colour=type), size = 3) +
+  #geom_point(aes(species_name, corr_breakpoints)) +
+  scale_y_continuous(name = "Number of events", position = "right") +
+  scale_colour_manual(values = bar_cols) +
+  coord_flip() +
+  theme_pubr() +
+  theme(axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = text_size),
+        legend.text = element_text(size = text_size),
+        legend.position = "right")
+
+ggsave(fission_fusion_barplot, filename=paste(output_path, "/plots/fission_fusion_barplot_merian_", Sys.Date(), ".png", sep =
+ ""),
+       height = 16,
+       width = 8)
+
+## read data
+summary_fus_fis <- fission_fusion_blocks %>% group_by(Node, type) %>%
+  summarise(events=sum(event)) %>% ungroup %>% pivot_wider(names_from = type, values_from = events)
+
+write.csv(summary_fus_fis, file = paste(output_path, "tables/fission_fusion_barplot_merian_", Sys.Date(), ".csv", sep = ""),
+          row.names = F)
+
+# add mec ancestor
+summary_fus_fis %>% filter(Node == "n1")
+
+rearr_all_n1 <- data.frame(child=c("n1", "n1"),
+                           X.parent=c("n0", "n0"),
+                           event=c("fusion", "fission"),
+                           param_nr=c("05", "05"),
+                           rearr=c(66, 51))
+
+rearr_all <- rbind(rearr_all, rearr_all_n1)
+
+# add agora estimate to parameter 05
+
+rearr_all <- rearr_all %>% mutate(rearr=case_when(param_nr=="05" & child == "n4" & event == "fusion" ~ 0,
+                                      param_nr=="05" & child == "n4" & event == "fission" ~ 6,
+                                      param_nr=="05" & child == "n8" & event == "fusion" ~ 8,
+                                      param_nr=="05" & child == "n8" & event == "fission" ~ 2,
+                                      param_nr=="05" & child == "n7" & event == "fusion" ~ 10,
+                                      param_nr=="05" & child == "n7" & event == "fission" ~ 4,
+                                      TRUE ~ rearr))
+
+```
+
+
+```{r function_plot_ms}
+
+
+plot_syngraph_tree_features_ms <- function(tree, rearr_all, chr_per_param, param_values, 
+                                                              out_prefix = "plots/Syngraph_clado_param", 
+                                                              rearr_ylim = c(0, 100),
+                                                              plot_xlim =  c(0,10),
+                                                              plot_ylim =  c(0,10),
+                                                              bar_cols = c("goldenrod", "tan4"),
+                                                              legend_plot = NULL,
+                                                              link_df = NULL,
+                                                              anc_busco = NULL,
+                                                              param_prefix = NULL,
+                                                              anc_colours = NULL,
+                                                              agora = FALSE, text_size = 5,
+                                           species_name_labels = species_name_labels) {
+  require(ggtree)
+  require(ggimage)
+  require(ggpubr)
+  require(dplyr)
+  require(tidyr)
+  
+  # Prepare wide rearrangement summary for nodebar
+  rearr_sum_wide <- data.frame(tidyr::pivot_wider(rearr_all, names_from = event, values_from = rearr, values_fill = 0))
+  rearr_sum_wide <- dplyr::inner_join(
+    rearr_sum_wide, 
+    data.frame(child = c(tree$tip.label, tree$node.label), node = seq(1, length(c(tree$tip.label, tree$node.label))))
+  )
+  
+  # Event column names (everything between param_nr and node in rearr_sum_wide)
+  event_cols <- setdiff(names(rearr_sum_wide)[4:ncol(rearr_sum_wide)], "node")
+  
+  event_cols_map <- c(
+    fission = "goldenrod",
+    fusion  = "tan4"
+  )
+  
+  # Range across all param values per node/event — used for error bars
+  rearr_range <- rearr_all %>%
+    dplyr::group_by(child, event) %>%
+    dplyr::summarise(min_rearr = min(rearr), max_rearr = max(rearr), .groups = "drop") %>%
+    dplyr::inner_join(
+      data.frame(child = c(tree$tip.label, tree$node.label),
+                 node  = seq_len(length(c(tree$tip.label, tree$node.label)))),
+      by = "child"
+    ) %>%
+    dplyr::mutate(event = factor(event, levels = event_cols))
+  
+  # Prepare chromosome cluster info
+  anc_chr <- chr_per_param %>%
+    dplyr::rename(Node = node) 
+  
+  anc_chr_range <- anc_chr %>% 
+    group_by(Node) %>%
+    summarise(Chr_nr_max = max(Chr_nr),
+              Chr_nr_min = min(Chr_nr))
+  
+  anc_chr <- left_join(anc_chr, anc_chr_range, by = "Node") %>%
+    mutate(Chr_nr_label = ifelse(Chr_nr_max == Chr_nr_min, as.character(Chr_nr_max), paste0(Chr_nr_min, "-", Chr_nr_max)))
+  
+  
+  
+  # If legend_plot is not provided, create a dummy for the legend
+  if (is.null(legend_plot)) {
+    legend_plot <- ggplot(rearr_all) +
+      geom_bar(aes(as.numeric(param_nr), rearr, fill = event), stat = "identity") +
+      scale_fill_manual(name = "Event", values = event_cols_map, labels = c(fission = "Fission", fusion = "Fusion")) +
+      theme_pubr() +
+      theme(legend.text = element_text(size = text_size*2.8), 
+            legend.title = element_text(size = text_size*2.8),
+            legend.title.position = "top",
+            legend.direction = "vertical")
+    fill_legend <- get_legend(legend_plot) 
+  } else {
+    fill_legend <- get_legend(legend_plot)
+  }
+  
+  # Loop over parameter values
+  for (i in stringr::str_pad(param_values, 2, pad = "0")) {
+    # Build bar + errorbar plots per node (avoids scale conflicts from nodebar + geom_errorbar)
+    node_ids <- rearr_sum_wide[rearr_sum_wide$param_nr == i, "node"]
+    bars <- setNames(lapply(node_ids, function(nd) {
+      nd_data <- rearr_sum_wide[rearr_sum_wide$param_nr == i & rearr_sum_wide$node == nd, ] %>%
+        tidyr::pivot_longer(cols = dplyr::all_of(event_cols), names_to = "event", values_to = "rearr") %>%
+        dplyr::mutate(event = factor(event, levels = event_cols))
+      nd_range <- rearr_range[rearr_range$node == nd, ]
+      
+      ggplot(nd_data, aes(x = event, y = rearr, fill = event)) +
+        geom_col(position = position_dodge(0.9)) +
+        geom_errorbar(data = nd_range,
+                      aes(x = event, ymin = min_rearr, ymax = max_rearr),
+                      width = 0.5, linewidth = 0.8, inherit.aes = FALSE, colour = "grey20") +
+        geom_text(aes(label = rearr), colour = "black", size = text_size, vjust = -0.5, hjust = 0.5,
+                  position = position_dodge(0.9)) +
+        scale_fill_manual(values = event_cols_map) +
+        scale_y_continuous(limits = rearr_ylim) +
+        ggtree::theme_inset()
+      
+    }), as.character(node_ids))
+    
+    # Cladogram with chromosome number labels
+    p_clado <- ggtree(tree, ladderize = TRUE, layout = "rectangular", right = TRUE) %<+% 
+      anc_chr[anc_chr$param_nr == i, ]  %<+% species_name_labels +
+      geom_tiplab(aes(label = species_name), size = text_size, offset = 0.0022,
+                  #nudge_x = 0.1*plot_xlim, 
+                  nudge_y = -0.15, fontface = "italic") +
+      geom_label(aes(label = Chr_nr_label), size = text_size, 
+                 nudge_x = 0.025*plot_xlim[2], nudge_y = 0
+      ) +
+      geom_treescale() +
+      xlim(plot_xlim) #+
+    # ylim(plot_ylim)
+    
+    
+    p_plot_cladogram <- p_clado + 
+      geom_inset(bars, 
+                 width = .06, height = .30, 
+                 x = "branch",
+                 vjust = -1.25, 
+                 hjust = 0.005*plot_xlim[2]
+      ) +
+      theme(legend.position = "bottom") 
+    
+    if (agora == TRUE) {
+      
+      link_long <- link_df
+      
+      y_lim_bar_chr <- max(link_long$end)
+      
+      bars_chr <- lapply(sort(unique(link_long$node)), function(nd) {
+        ggplot(link_long[link_long$node == nd, ]) +
+          geom_point(aes(x = chr, y = start, colour = anc_element), shape = 95) +
+          scale_colour_manual(values = anc_palette) +
+          scale_y_continuous(limits = c(0, y_lim_bar_chr)) +
+          theme_void() +
+          theme(legend.position = "none")
+      })
+      
+      names(bars_chr) <- sort(unique(link_long$node))
+      
+      
+      
+      
+    } else {
+      # if a link file is given as a parameter, use that. But if not, prepare the long format table for chromosome painting from the table file in the syngraph output for the current parameter value, and the anc_busco table for ancestral element info.
+      if (is.null(link_df)) {
+        link_long <- get_link_long(i = i, anc_busco = anc_busco, param_prefix = param_prefix, tree = tree)
+      } else {
+        #or if a link_file is already prepared:
+        link_long <- link_df
+      }
+
+      
+      anc_palette <- anc_colours$anc_colour
+      names(anc_palette) <- anc_colours$anc_element
+      
+      bars_chr <- lapply(sort(unique(link_long$node)), function(nd) {
+        ggplot(link_long[link_long$node == nd, ],
+               aes(x = reorder(chr, -n), fill = anc_element)) +
+          geom_point(alpha = 0.7) +
+          scale_fill_manual(values = anc_palette) +
+          theme_void() +
+          theme(legend.position = "none")
+      })
+      names(bars_chr) <- sort(unique(link_long$node))
+    } 
+    
+    max_width <- 0.18  # inset width for the node with most chromosomes
+    node_gap  <- 0.05 # fixed distance from node to near edge of inset
+    
+    n_chr <- sapply(names(bars_chr), function(nd) {
+      length(unique(link_long$chr[link_long$node == nd]))
+    })
+    
+    widths <- setNames(n_chr / max(n_chr) * max_width, names(bars_chr))
+    
+    for (nd in names(bars_chr)) {
+      # keep near edge at constant distance: hjust = -(node_gap + width/2)
+      hjust_nd <- -(node_gap + widths[[nd]]/2.5)
+      
+      p_plot_cladogram <- p_plot_cladogram +
+        geom_inset(bars_chr[nd],
+                   x = "node",
+                   vjust = -0.38, hjust = hjust_nd*plot_xlim[2],
+                   width = widths[[nd]], height = 0.08)
+    }
+    
+    
+    
+    legend_plot <- ggplot(data.frame(anc_element = names(anc_palette)),
+                          aes(x = 1, y = anc_element, fill = anc_element)) +
+      geom_tile() +
+      scale_fill_manual(values = anc_palette) +
+      theme_void() +
+      theme(legend.text = element_text(size = text_size*2.8), legend.title = element_text(size = text_size*2.8)) +
+      guides(fill = guide_legend(title = "Butterfly ALG", title.position = "top", label.position = "right", direction = "vertical", ncol = 2))
+    
+    anc_legend <- get_legend(legend_plot)
+    
+    ggsave(
+      ggarrange(p_plot_cladogram,
+        ggarrange(anc_legend, fill_legend, ncol = 1, widths = c(7,1)),
+        ncol = 2, widths = c(7, 1)),
+      filename = paste0(out_prefix, i, "_painting.pdf"),
+      height = 14, width = 20
+    )
+  }
+}
+
+```
+

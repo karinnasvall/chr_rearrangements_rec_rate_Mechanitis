@@ -1,0 +1,35 @@
+#!/bin/bash
+#BSUB -J breakpoint_pipeline
+#BSUB -q oversubscribed
+#BSUB -n 1
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000] span[hosts=1]"
+#BSUB -o log/breakpoint_%J.out
+#BSUB -e log/breakpoint_%J.err
+
+
+# LSF job script to run the breakpoint detection pipeline
+# Submit with: bsub < run_nf.bsub
+
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/anc_reconstruction_pipeline_260609
+
+cd $WD
+
+module load nextflow/25.10.4-11177
+
+TREE=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/anc_reconstruction_pipeline_260609/tree_pnas_pruned.txt
+#/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/anc_reconstruction_pipeline_260516/work/be/02fc7701c9f9e3131fef3078a4b6e3/results/Results_May16/Species_Tree/Potential_Rooted_Species_Trees/SpeciesTree_rooted_at_outgroup_6.txt
+
+# Run Nextflow pipeline with correct parameter names (underscores, not hyphens)
+nextflow run main.nf \
+    --genome_list list_Mec_genomes.txt \
+    --ref_genome ilDanPlex1 \
+    --user_tree $TREE \
+  --skip_busco true \
+  --precomputed_busco_dir results/02_busco \
+  --syngraph_m_min 5 \
+  --syngraph_m_max 40 #\
+ #-resume
+
+echo "Job finished"
+conda deactivate

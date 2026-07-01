@@ -1,0 +1,27 @@
+#!/bin/bash
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -n 10
+#BSUB -q week
+#BSUB -J pyrho_hp
+#BSUB -o log/pyrho_hp_lsf.%J.%I.out
+#BSUB -e log/pyrho_hp_lsf.%J.%I.err
+
+# output from smc++
+SPECIES=polymnia
+POP=ecu_col
+
+INPUT_SMC=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/demographic_inference/${SPECIES}/smc_out_${POP}_all/all_plot.csv
+OUTPUT_DIR=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/pyrho/${SPECIES}/
+LOOKUP_TBL=${OUTPUT_DIR}/lookup_table/${POP}_lookup.hdf
+
+#load modules
+module load pyrho/0.2.1-c3
+
+mkdir ${OUTPUT_DIR}/hyperparams
+cd ${OUTPUT_DIR}/hyperparams 
+
+pyrho hyperparam --numthreads 4 --samplesize 172 --tablefile $LOOKUP_TBL --num_sims 3 --smcpp_file $INPUT_SMC \
+--mu 2.9e-9 --ploidy 2 --outfile ${POP}_hyperparam.out \
+--logfile ${POP}_hyperparam.log
+

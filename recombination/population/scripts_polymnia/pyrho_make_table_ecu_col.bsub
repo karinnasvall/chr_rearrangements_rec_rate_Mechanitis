@@ -1,0 +1,37 @@
+#!/bin/bash
+#BSUB -M 100000
+#BSUB -R "select[mem>100000] rusage[mem=100000] span[hosts=1]"
+#BSUB -n 10
+#BSUB -q long
+#BSUB -J pyrho_mt
+#BSUB -o log/pyrho_mt_lsf.%J.%I.out
+#BSUB -e log/pyrho_mt_lsf.%J.%I.err
+
+
+# output from smc++
+SPECIES=polymnia
+POP=ecu_col
+SAMPLESIZE=172 # 86 ind, so 172 haploids
+N_MORAN=258 # 50% larger
+INPUT_SMC=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/demographic_inference/${SPECIES}/smc_out_${POP}_all/all_plot.csv
+OUTPUT_DIR=lustre/scratch125/tol/teams/meier/users/kn9/recombination/pyrho/${SPECIES}
+
+cd ${OUTPUT_DIR}
+
+#load modules
+ml pyrho/0.2.1-c3
+
+mkdir lookup_table
+cd lookup_table
+
+pyrho make_table --samplesize $SAMPLESIZE  --approx  --moran_pop_size $N_MORAN \
+    --numthreads 10 --mu 2.9e-9 --outfile ${POP}_lookup.hdf \
+    --smcpp_file ${INPUT_SMC} \
+    --logfile ${POP}_lookup.log
+
+
+pyrho make_table --samplesize $SAMPLESIZE  --approx  --moran_pop_size $N_MORAN \
+    --numthreads 10 --mu 2.9e-9 --outfile ${POP}_constant_lookup.hdf \
+    --popsizes 100000,100000,100000 --epochtimes 100000,1000000 \
+    --logfile ${POP}_constant_lookup.log
+

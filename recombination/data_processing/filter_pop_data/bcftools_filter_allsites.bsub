@@ -1,0 +1,50 @@
+#!/bin/bash
+#BSUB -M 500
+#BSUB -R "select[mem>500] rusage[mem=500]"
+#BSUB -n 2
+#BSUB -q normal
+#BSUB -J bcftools_filter[1-16]
+#BSUB -o log/bcftools_filter.%J.%I.out
+#BSUB -e log/bcftools_filter.%J.%I.err
+
+VCF=$(sed -n -e ${LSB_JOBINDEX}p list_vcfs.txt)
+
+WD=/data/tol/teams/meier/lustre/users/kn9/recombination/rawdata_to_vcf
+VCF_DIR=${WD}/03_variant_call_lysimnia_rptmask/output_vcf/vcfs
+OUTDIR=${WD}/04_vcf_filtering/lysimnia/02_filtered_vcfs
+OUTDIR_ALL=${WD}/04_vcf_filtering/lysimnia/02_filtered_vcfs_allsites
+
+
+mkdir -p $OUTDIR/vcf_thinned
+mkdir -p $OUTDIR_ALL/vcf_thinned
+
+
+echo "Processing ${VCF_DIR}/${VCF}"
+
+#load modules
+module load bcftools/1.20--h8b25389_0  
+
+# get vcf with only variants: 'view -v snps -m2 -M2' - only biallelic snps
+# bcftools filter gives genotypes with low depth and low quality marked ./. (missing)
+# site filtering after marking low qual/dp genomtypes as missing
+
+bcftools view -S ^list_samples_to_remove.txt ${VCF_DIR}/${VCF} \
+| bcftools view -v snps -m2 -M2 \
+| bcftools filter -i 'FMT/DP>=6 & FMT/AD>=2 & FMT/GQ>=30' --SnpGap 5 -S . \
+| bcftools view -i 'INFO/DP<1300 && F_MISSING<0.2 && QUAL>30 && INFO/MQ >= 20 && MAF>0.02' \
+-Oz -o ${OUTDIR}/${VCF%.*}_filtered.vcf.gz
+
+bcftools stats -s - ${OUTDIR}/${VCF%.*}_filtered.vcf.gz > ${OUTDIR}/${VCF%.*}_filtered.stats
+# thin file for qc
+bcftools view -v snps ${OUTDIR}/${VCF%.*}_filtered.vcf.gz | bcftools +prune -w 10000bp -n 1 -N rand --output ${OUTDIR}/vcf_thinned/${VCF%.*}_thin_snps.vcf.gz -Oz
+
+
+# # get filtered all sites file (can't filter on MAF or GQ here)
+bcftools view -S ^list_samples_to_remove.txt ${VCF_DIR}/${VCF} \
+| bcftools filter -i 'FMT/DP>=6' --SnpGap 5 -S . \
+| bcftools view -i 'INFO/DP<1300 && F_MISSING<0.2 && QUAL>30 && INFO/MQ >= 20' \
+-Oz -o ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz
+
+bcftools stats -s - ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz > ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.stats
+# thin file for qc
+bcftools view -v snps ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz | bcftools +prune -w 10000bp -n 1 -N rand --output ${OUTDIR_ALL}/vcf_thinned/${VCF%.*}_thin_snps.vcf.gz -Oz

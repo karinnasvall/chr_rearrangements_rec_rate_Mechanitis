@@ -1,0 +1,36 @@
+#!/bin/bash
+#BSUB -M 4000
+#BSUB -R "select[mem>4000] rusage[mem=4000]"
+#BSUB -n 2
+#BSUB -q normal
+#BSUB -J bcftools_filter[1-16]
+#BSUB -o log/bcftools_filter.%J.%I.out
+#BSUB -e log/bcftools_filter.%J.%I.err
+
+VCF=$(sed -n -e ${LSB_JOBINDEX}p list_vcfs.txt)
+
+WD=/data/tol/teams/meier/lustre/users/kn9/recombination/rawdata_to_vcf
+VCF_DIR=${WD}/03_variant_call_lysimnia_rptmask/output_vcf/vcfs
+OUTDIR=${WD}/04_vcf_filtering/lysimnia/02_filtered_vcfs
+OUTDIR_STAT_SUM=${WD}/04_vcf_filtering/lysimnia/03_vcf_qc_filtered/tables
+
+
+mkdir -p $OUTDIR
+mkdir -p $OUTDIR_STAT_SUM
+
+echo "Processing ${VCF_DIR}/${VCF}"
+
+#load modules
+module load bcftools/1.20--h8b25389_0  
+
+# get vcf with only variants: 'view -v snps -m2 -M2' - only biallelic snps
+# bcftools filter gives genotypes with low depth and low quality marked ./. (missing)
+# site filtering after marking low qual/low dp genomtypes as missing
+
+bcftools view -S ^list_samples_to_remove.txt ${VCF_DIR}/${VCF} \
+| bcftools view -v snps -m2 -M2 \
+| bcftools filter -i 'FMT/DP>=6 & FMT/AD>=2 & FMT/GQ>=10' -S . \
+| bcftools view -i 'INFO/DP<1300 && F_MISSING<0.2 && QUAL>10 && MQ >= 20 && MAF>0.02' \
+-Oz -o ${OUTDIR}/${VCF%.*}_filtered.vcf.gz
+
+bcftools stats -s - ${OUTDIR}/${VCF%.*}_filtered.vcf.gz > ${OUTDIR}/${VCF%.*}_filtered.stats

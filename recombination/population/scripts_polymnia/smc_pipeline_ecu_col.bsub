@@ -1,0 +1,64 @@
+#!/bin/bash
+#BSUB -M 25000
+#BSUB -R "select[mem>25000] rusage[mem=25000] span[hosts=1]"
+#BSUB -n 10
+#BSUB -q long
+#BSUB -J smc
+#BSUB -o log/smc_lsf.%J.%I.out
+#BSUB -e log/smc_lsf.%J.%I.err
+
+
+module load bcftools/1.20--h8b25389_0
+
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/demographic_inference/polymnia
+VCF_DIR=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/rawdata_to_vcf/04_vcf_filtering/polymnia/02_filtered_vcfs
+VCF_CONCAT=vcf_filtered_concat.vcf.gz
+MASK_BED=${WD}/input/ilMecPoly1_repeats_SUPER.bed_sorted.bed.gz
+POP=ecu_col
+POP_IND=$(cat lists/population_list_ecu_col.txt)
+LIST_D_IND=lists/dist_ind_ecu_col.txt
+
+# A list of distinguished individuals (list_dist_ind.txt) should be produced before running this script
+# The input vcf should be filtered and contain only biallelic SNPs 
+
+#mkdir -p input
+mkdir -p output_$POP
+
+#concatenate the vcf files
+
+# ls $VCF_DIR/*filtered.vcf.gz | sort -V  > lists/list_vcf.txt
+# bcftools index -t $VCF_DIR/*filtered.vcf.gz
+# bcftools concat -f lists/list_vcf.txt -Oz -o ${VCF_DIR}/$VCF_CONCAT
+
+# # index the concatenated vcf
+# bcftools index -t ${VCF_DIR}/$VCF_CONCAT
+
+
+# # get list of chromosomes
+# bcftools query -f '%CHROM\n' ${VCF_DIR}/$VCF_CONCAT | grep -v -E "SCAFFOLD|UNLOC|unloc|scaffold" | sort -V | uniq > lists/list_chrom.txt
+
+# Convert vcf to smc format for each chromosome and each distinguished individual
+
+# need to give the absolute path to the input files, docker problems...
+# running with -d distinguished individuals. The data is unphased so using only one ind twice
+# for chrom in $(cat lists/list_chrom.txt); do 
+#     echo "Processing chromosome: ${chrom}"
+#     while IFS=$'\t' read -r ind; do
+#         echo "Processing individual: ${ind}"
+#         singularity run -B /lustre docker://terhorst/smcpp:latest vcf2smc -d $ind $ind --mask $MASK_BED ${VCF_DIR}/$VCF_CONCAT ${WD}/output_${POP}/out.${chrom}.${ind}.${ind}.txt $chrom $POP_IND
+#     done < $LIST_D_IND
+
+#     # # Estimate demographic history from the smc files produced by vcf2smc
+#     # echo "Estmating demographic history for ${chrom}"
+#     # wait
+#     # mkdir -p ${WD}/smc_out_${POP}/${chrom}
+#     # singularity run -B /lustre docker://terhorst/smcpp:latest estimate 2.9e-9 ${WD}/output_${POP}/out.${chrom}.*.txt -o ${WD}/smc_out_${POP}/${chrom}
+#     # singularity run -B /lustre docker://terhorst/smcpp:latest plot --csv ${WD}/smc_out_${POP}/${chrom}/plot_${chrom}.png ${WD}/smc_out_${POP}/${chrom}/model*.json
+
+# done
+
+mkdir ${WD}/smc_out_${POP}_all
+echo "Estimating demographic history for ${POP}"
+
+singularity run -B /lustre docker://terhorst/smcpp:latest estimate 2.9e-9 ${WD}/output_${POP}/out.SUPER_[1-9]*.txt -o ${WD}/smc_out_${POP}_all/
+singularity run -B /lustre docker://terhorst/smcpp:latest plot --csv ${WD}/smc_out_${POP}_all/all_plot.png ${WD}/smc_out_${POP}_all/model*.json

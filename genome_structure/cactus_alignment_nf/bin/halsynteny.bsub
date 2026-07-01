@@ -1,0 +1,59 @@
+#!/bin/bash
+#BSUB -J halsynteny
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 1000
+#BSUB -R "select[mem>1000] rusage[mem=1000] span[hosts=1]"
+#BSUB -o log/halsynteny.%J.out
+#BSUB -e log/halsynteny.%J.err
+
+
+module load cactus/v3.1.2
+
+INPUT_HAL=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/cactus_260321/output/Mec_align.hal
+OUTPUT_DIR=output_halsynteny
+
+GENOME1="ilMecPoly1"
+GENOME2="ilMecLysi212"
+ANCESTOR="N7"
+
+min_block_size=5000
+max_block_distance=5000
+
+mkdir -p ${OUTPUT_DIR}
+
+# halSynteny --queryGenome ${GENOME1} \
+#            --targetGenome ${GENOME2} \
+#            ${INPUT_HAL} ${OUTPUT_DIR}/halsynteny_${GENOME1}_${GENOME2}.psl
+
+# # ancestor-genome comparisons
+# halSynteny --queryGenome ${GENOME1} \
+#            --targetGenome ${ANCESTOR} \
+#            ${INPUT_HAL} ${OUTPUT_DIR}/halsynteny_${GENOME1}_${ANCESTOR}.psl
+
+# ancestor-genome comparisons
+halSynteny --queryGenome ${GENOME2} \
+           --targetGenome ${ANCESTOR} \
+           ${INPUT_HAL} ${OUTPUT_DIR}/halsynteny_${GENOME2}_${ANCESTOR}.psl
+
+
+
+# halSynteny --help
+ 
+# /home/cactus/bin/halSynteny v2.2: Convert alignments into synteny blocks
+
+# USAGE:
+# /home/cactus/bin/halSynteny [Options] <alignment> <outPslPath>
+
+# ARGUMENTS:
+# alignment:    input file in HAL or PSL format (PSL must specify --alignmentIsPsl)
+# outPslPath:   output psl file ffor synteny blocks
+
+# OPTIONS:
+# --alignmentIsPsl:              alignment is in PSL format [default = 0]
+# --maxAnchorDistance <value>:   upper bound on distance for syntenic psl blocks 
+#                                [default = 5000]
+# --minBlockSize <value>:        lower bound on synteny block length [default = 5000]
+
+# --queryGenome <value>:         source genome [default = ""]
+# --targetGenome <value>:        reference genome name [default = ""]

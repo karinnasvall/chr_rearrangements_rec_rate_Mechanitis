@@ -1,0 +1,58 @@
+#!/bin/bash
+#BSUB -M 15000
+#BSUB -R "select[mem>15000] rusage[mem=15000] span[hosts=1]"
+#BSUB -n 10
+#BSUB -q normal
+#BSUB -J smc
+#BSUB -o log/smc_lsf.%J.%I.out
+#BSUB -e log/smc_lsf.%J.%I.err
+
+
+module load bcftools/1.20--h8b25389_0
+VCF_DIR=../../rawdata_to_vcf/04_vcf_filtering/lysimnia/02_filtered_vcfs
+VCF_CONCAT=vcf_filtered_concat.vcf.gz
+MASK_BED=ilMecLysi212_repeats_SUPER.bed
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/demographic_inference/lysimnia
+POP=ecuador
+POP_IND=Ecuador:CAM070350_Mechanitis_lysimnia,CAM070352_Mechanitis_lysimnia,CAM070355_Mechanitis_lysimnia,CAM070416_Mechanitis_lysimnia,CAM070927_Mechanitis_lysimnia,CAM070994_Mechanitis_lysimnia,CAM071022_Mechanitis_lysimnia,CAM071057_Mechanitis_lysimnia,CAM071058_Mechanitis_lysimnia,CAM071236_Mechanitis_lysimnia,CAM074654_Mechanitis_lysimnia,CAM074865_Mechanitis_lysimnia,CAM074866_Mechanitis_lysimnia,CAM074867_Mechanitis_lysimnia,CAM074868_Mechanitis_lysimnia,CAM074869_Mechanitis_lysimnia,CAM074870_Mechanitis_lysimnia,CAM028192_Mechanitis_lysimnia,CAM028197_Mechanitis_lysimnia,Eli_20338_Mechanitis_lysimnia,Eli_20367_Mechanitis_lysimnia,Eli_20547_Mechanitis_lysimnia
+LIST_D_IND=dist_ind_ecu.txt
+
+# A list of distinguished individuals (list_dist_ind.txt) should be produced before running this script
+# The input vcf should be filtered and contain only biallelic SNPs 
+
+mkdir -p input
+mkdir -p output_$POP
+
+#concatenate the vcf files
+
+# ls $VCF_DIR/*.vcf.gz | sort -V  > list_vcf.txt
+# bcftools concat -f list_vcf.txt -Oz --output input/$VCF_CONCAT
+# cp $VCF_DIR/$VCF_CONCAT input/
+# # index the concatenated vcf
+# bcftools index -t input/$VCF_CONCAT
+
+# #compress and index the bed file
+# bgzip input/$MASK_BED
+# tabix input/${MASK_BED}.gz
+
+# # get list of chromosomes
+# bcftools query -f '%CHROM\n' input/$VCF_CONCAT | grep -v -E "SCAFFOLD|UNLOC|unloc|scaffold" | sort -V | uniq > list_chrom.txt
+
+# # Convert vcf to smc format for each chromosome and each distinguished individual
+
+# # need to give the absolute path to the input files, docker problems...
+# # running with -d distinguished individuals. The data is unphased so using only one ind twice
+# for chrom in $(cat list_chrom.txt); do 
+#     echo "Processing chromosome: ${chrom}"
+#     while IFS=$'\t' read -r ind; do
+#         echo "Processing individual: ${ind}"
+#         singularity run -B /lustre docker://terhorst/smcpp:latest vcf2smc -d $ind $ind --mask ${WD}/input/${MASK_BED}.gz ${WD}/input/$VCF_CONCAT ${WD}/output_${POP}/out.${chrom}.${ind}.${ind}.txt $chrom $POP_IND
+#     done < $LIST_D_IND
+
+
+# done
+
+singularity run -B /lustre docker://terhorst/smcpp:latest estimate 2.9e-9 ${WD}/output_${POP}/out.SUPER_[1-9]*.txt -o ${WD}/smc_out_${POP}_all/
+singularity run -B /lustre docker://terhorst/smcpp:latest plot --csv ${WD}/smc_out_${POP}_all/all_plot.png ${WD}/smc_out_${POP}_all/model*.json
+
+

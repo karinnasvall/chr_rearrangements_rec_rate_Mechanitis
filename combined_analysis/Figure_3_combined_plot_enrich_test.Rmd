@@ -1,0 +1,1199 @@
+
+
+```{r enrichment_test}
+
+combined_df_brp %>% filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "Recombination_rate"
+            )) %>% group_by(genome, feature) %>% dplyr::summarize(median(value, na.rm=T))
+
+combined_df_brp %>% filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "Recombination_rate"
+            )) %>%
+  ggplot() +
+  geom_histogram(aes(value)) +
+  facet_wrap(~feature, scales = "free")
+
+
+
+source("bin/genomic_enrichment_test_v7.R")
+
+n_perm=50000
+
+input_df <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>%
+            filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "eig_scores",
+                "Recombination_rate"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end")
+
+
+opt <- list(
+    features = input_df,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_feat_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_feat_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_pol <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>%
+            filter(genome == "ilMecPoly1" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mpol"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") 
+opt <- list(
+    features = input_df_pol,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_pol_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_pol_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_lys <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>% 
+            filter(genome == "ilMecLysi212" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mlys"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end")
+opt <- list(
+    features = input_df_lys,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_lys_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_lys_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+```
+
+
+
+
+```{r enrichment_ends}
+
+source("bin/genomic_enrichment_test_v7.R")
+
+n_perm=50000
+
+input_df <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>%
+            filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "eig_scores",
+                "Recombination_rate"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") %>% filter(event_timing %in% c("colinear", "end"))
+
+
+opt <- list(
+    features = input_df,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_feat_end_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_feat_end_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_pol <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>%
+            filter(genome == "ilMecPoly1" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mpol"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") %>% filter(event_timing %in% c("colinear", "end"))
+opt <- list(
+    features = input_df_pol,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_pol_end_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_pol_end_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_lys <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>% 
+            filter(genome == "ilMecLysi212" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mlys"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") %>% filter(event_timing %in% c("colinear", "end"))
+opt <- list(
+    features = input_df_lys,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_lys_end_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_lys_end_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+```
+
+
+
+```{r feature_df}
+
+feature_df <- combined_df_brp %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1")) %>% filter(feature %in% c("Genes", "Total_repeats", "Recombination_rate", "GC")) %>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing))
+
+
+
+feature_df$event_class <- paste(feature_df$event_timing, feature_df$type, sep = "_")
+unique(feature_df$event_class)
+feature_df$event_class <- factor(feature_df$event_class,
+levels = c("anc_proxy_fusion", "anc_proxy_fission-fusion", "focal_fusion", "focal_fission-fusion", "focal_fission", "shared_event_n4_shared_fission", "end_colinear", "colinear_colinear"))
+
+
+feature_df$event_timing <- factor(feature_df$event_timing,
+levels = c(  "colinear","end",  "focal", "anc_proxy","shared_event_n4")
+)
+feature_df$feature <- factor(feature_df$feature,
+                             levels = c("Recombination_rate", "Genes", "Total_repeats", "GC"))
+
+feature_df %>% group_by(event_timing, type) %>% count()
+
+unique(feature_df[feature_df$event_timing=="shared_event_n4","type"])
+
+feature_df[feature_df$event_timing=="shared_event_n4",]$type = "fission"
+
+feature_df %>% filter(feature == "Recombination_rate") %>%
+ggplot() +
+  geom_point(aes(start, value, colour = event_class), alpha = 0.6) +
+  facet_wrap(genome~chr) +
+    scale_colour_manual(values= c( "white", "white", "#333333","#333333","#333333", "#818181", "#CCCCCC", "tan"),
+                  name = "",
+                  labels = c("Ancestral proxy", "Breakpoint", "Ancestral breakpoint (1.3-1.6 My)", "Background", "End"))
+                  
+  
+
+
+textsize = 14
+mec_colors <- c("ilMecPoly1" = "#2166AC", "ilMecLysi212" = "#EC7014")
+mec_colors <- c("ilMecPoly1" = "#2166AC", "ilMecLysi212" = "darkorange")
+
+feature_plot_box <- 
+  feature_df %>%
+  ggplot(aes(x=event_class, y=value)) +
+    geom_boxplot_pattern(aes(fill =event_class,
+                             pattern = event_class), alpha = 0.8, outlier.colour = "grey30", show.legend = T, pattern_key_scale_factor=2) +
+  #geom_jitter(data=feature_df %>% filter(!type %in% c("colinear")), aes(shape = type), width = 0.05, height = 0, alpha = 0.5, fill="black") +
+    stat_summary(
+    fun = median,
+    geom = "crossbar",
+    aes(group = feature),
+    width = 0.5,
+    color = "black",
+    linewidth = 0.2,
+    position = position_dodge(width = 0.8)
+  ) +
+  facet_wrap(~feature, scales = "free", strip.position = "bottom",) +
+  scale_fill_manual(values= c("white", "white", "#333333","#333333","#333333", "#818181", "#CCCCCC", "tan"),
+                  name = "Breakpoint type",
+                  labels = c("Ancestral proxy: fusion", "Ancestral proxy: fission-fusion", "Fusion", "Fission-fusion","Fission", "Ancestral breakpoint (1.3-1.6 My)","End (200 kb from telomere)", "Background")
+                    ) +
+
+  scale_pattern_discrete(choices = c("none", "stripe", "none", "stripe", "crosshatch", "none", "none","none" ),
+                         name = "Breakpoint type",
+                  labels = c("Ancestral proxy: fusion", "Ancestral proxy: fission-fusion", "Fusion", "Fission-fusion","Fission", "Ancestral breakpoint (1.3-1.6 My)","End (200 kb from telomere)", "Background")) +
+  theme_classic() +
+  theme(strip.text.x.bottom = element_text(size = textsize),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize)) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        pattern = c("none", "stripe", "none", "stripe",
+                    "crosshatch", "none", "none", "none")
+      )
+    )
+  )
+
+feature_plot_box
+
+feature_df %>% group_by(type) %>% count() %>%
+  ggplot() +
+  geom_bar_pattern(aes(type, n, pattern = type, pattern_angle = type), stat = "identity")
+
+```
+
+```{r compare_groups}
+# The enrichment test test if they are different from the background
+# This test if their mean is different from each other
+
+
+
+library(dplyr)
+library(purrr)
+library(rstatix)
+
+# vars <- c("feature", "event_timing")
+# 
+# all_results <- map_dfr(vars, function(v){
+# 
+#   
+#   combined_df_brp %>%
+#     pairwise_wilcox_test(
+#       reformulate("event_timing", response = v),
+#       p.adjust.method = "BH"
+#     ) %>%
+#     mutate(value = v)
+# })
+
+all_results
+
+
+feature_df$event_class <- paste(feature_df$type, feature_df$event_timing)
+
+result_all <- feature_df %>%
+  filter(type != "Complex") %>%
+  group_by(feature) %>%
+  group_modify(~{
+    if (n_distinct(.x$event_class) < 2)
+      return(tibble())
+
+    pairwise_wilcox_test(
+      .x,
+      value ~ event_class,
+      p.adjust.method = "BH"
+    )
+  }) %>%
+  ungroup()
+
+View(result_all)
+
+result_all_filt <- result_all %>% mutate(type_grp1=word(group1, 1),
+                      type_grp2=word(group2, 1)) %>%
+  filter(type_grp1=="colinear" | type_grp1 == type_grp2 )
+
+View(result_all_filt)
+
+write.csv(result_all_filt, file = paste("tables/result_wilcox_features_brp_", Sys.Date(), ".csv", sep = ""), quote = F, row.names = F)
+
+result_all_filt %>% filter(p.adj < 0.05)
+
+
+```
+
+
+
+```{r feature_box}
+feature_df %>% group_by(event_timing, type) %>% count()
+
+my_labeller_box_features <- labeller(
+  feature = c(Genes = "Genes (%)",
+              Recombination_rate = "Recomb. rate (cM/Mb)",
+              Total_repeats = "Total repeats (%)",
+              GC = "GC-content (%)" ),
+  type = c(colinear = "Background",
+           fission = "Fission",
+           'fission-fusion' = "Fission-fusion",
+           fusion="Fusion"))
+
+feature_df <- feature_df %>% mutate(value=case_when(feature %in% c("Genes", "Total_repeats") ~ value*100,
+                                TRUE ~ value))
+
+result_all_test <- result_all_test %>% mutate(y.position=case_when(feature %in% c("Genes", "Total_repeats", "GC") ~ y.position*100,
+                                TRUE ~ y.position))
+library(dplyr)
+library(rstatix)
+
+
+feature_plot_box <- 
+  feature_df %>% filter(event_timing!="shared_event_n4") %>% filter(!is.na(event_timing) & type %in% c("colinear", "fission-fusion") & feature %in% c("Recombination_rate", "Total_repeats")) %>%
+  ggplot() +
+    geom_boxplot(aes(x=event_timing, y=value, fill = event_timing),
+                 alpha = 0.8, outlier.colour = "grey30", show.legend = F) +
+  facet_grid(~feature~type, scales = "free",
+             labeller = my_labeller_box_features, switch = "y", drop = T) +
+  #stat_pvalue_manual(result_all_test, "p.adj.signif", hide.ns = T) +
+  scale_fill_manual(values= c("tan", "tan4", "#333333", "white","#818181"),
+                  name = "Breakpoint type",
+                  labels = c("Background",  "End (200 kb from telomere)", "Focal genome","Compared genome (ancestral proxy)",  "Ancestral breakpoint (1.3 - 1.6 Myr)")
+                    ) +
+    scale_x_discrete(labels = c(colinear = "Genome wide", end = "Chromosome ends", focal = "BRP", anc_proxy = "Anc. prox")) +
+  theme(panel.background = element_rect(fill="white", colour = "grey30"),
+        strip.text = element_text(size = textsize),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 90, size = textsize, hjust = 0),
+        axis.text.y = element_text(size = textsize),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize))
+
+feature_plot_box
+
+```
+
+```{r}
+
+
+diver_df <- combined_df_brp %>% filter(feature %in% c( "dxy", "Fst")) %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1"))%>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing)) %>% filter(event_timing != "NA") 
+
+unique(diver_df$event_timing)
+diver_df$event_timing <- factor(diver_df$event_timing,
+levels = c( "colinear","end",  "focal", "anc_proxy","shared_event_n4")
+)
+
+diver_df %>% group_by(event_timing, type) %>% count()
+
+unique(diver_df[diver_df$event_timing=="shared_event_n4","type"])
+
+diver_df[diver_df$event_timing=="shared_event_n4",]$type = "fission"
+
+my_labeller_div <- labeller(feature = as_labeller(c(dxy="D[XY]", Fst="F[ST]"),
+                           default = label_parsed), 
+                          type = c(colinear = "Background",
+           fission = "Fission",
+           'fission-fusion' = "Fission-fusion",
+           fusion="Fusion"))
+
+diverg_plot_box <- 
+  diver_df %>% filter(event_timing!="shared_event_n4") %>% filter(!is.na(event_timing) & type %in% c("colinear", "fission-fusion") & event_timing != "anc_proxy" & !is.na(feature)) %>%
+  ggplot() +
+    geom_boxplot(aes(x=event_timing, y=value, fill = event_timing),
+                 alpha = 0.8, outlier.colour = "grey30", show.legend = F) +
+  facet_grid(~feature~type, scales = "free",
+             labeller = my_labeller_div, switch = "y", drop = T) +
+  #stat_pvalue_manual(result_all_test, "p.adj.signif", hide.ns = T) +
+  scale_fill_manual(values= c("tan", "tan4", "#333333", "white","#818181"),
+                  name = "Breakpoint type",
+                  labels = c("Background",  "End (200 kb from telomere)", "Focal genome", "Ancestral breakpoint (1.3 - 1.6 Myr)")
+                    ) +
+    scale_x_discrete(labels = c(colinear = "Genome wide", end = "Ends", focal = "BRP")) +
+  theme(panel.background = element_rect(fill="white", colour = "grey30"),
+        strip.text = element_text(size = textsize),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(size = textsize),
+        axis.text.y = element_text(size = textsize),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize))
+
+diverg_plot_box
+
+
+```
+
+```{r}
+
+
+pi_df_pol <- combined_df_brp %>% filter(feature == "pi_Mpol" & genome == "ilMecPoly1") %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1"))%>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing)) %>% filter(event_timing != "NA") 
+
+pi_df_lys <- combined_df_brp %>% filter(feature == "pi_Mlys" & genome == "ilMecLysi212") %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1"))%>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing)) %>% filter(event_timing != "NA")
+
+pi_df <- rbind(pi_df_pol, pi_df_lys)
+
+unique(pi_df$event_timing)
+pi_df$event_timing <- factor(pi_df$event_timing,
+levels = c( "colinear","end",  "focal", "anc_proxy","shared_event_n4")
+)
+
+pi_df %>% group_by(event_timing, type) %>% count()
+
+unique(pi_df[pi_df$event_timing=="shared_event_n4","type"])
+
+pi_df[pi_df$event_timing=="shared_event_n4",]$type = "fission"
+
+my_labeller_pi <- labeller(type = c(colinear = "Background",
+           fission = "Fission",
+           'fission-fusion' = "Fission-fusion",
+           fusion="Fusion"))
+
+pi_plot_box <- 
+  pi_df %>% filter(event_timing!="shared_event_n4") %>% filter(!is.na(event_timing) & !is.na(feature) & type %in% c("colinear", "fission-fusion") ) %>% 
+  ggplot() +
+    geom_boxplot(aes(x=event_timing, y=value, fill = event_timing),
+                 alpha = 0.8, outlier.colour = "grey30", show.legend = F) +
+  facet_grid(~type, scales = "free", drop = T, labeller = my_labeller_pi) +
+  #stat_pvalue_manual(result_all_test, "p.adj.signif", hide.ns = T) +
+  scale_fill_manual(values= c("tan", "tan4", "#333333", "white","#818181"),
+                  name = "Breakpoint type",
+                  labels = c("Background",  "End (200 kb from telomere)", "Focal genome", "Origin (ancestral proxy)")
+                    ) +
+    scale_x_discrete(labels = c(colinear = "Genome wide", end = "Ends", focal = "BRP", anc_proxy = "Anc. proxy")) +
+  labs(y = expression(pi)) +
+  theme(panel.background = element_rect(fill="white", colour = "grey30"),
+        strip.text = element_text(size = textsize),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(size = textsize),
+        axis.text.y = element_text(size = textsize),
+        axis.title.y = element_text(size = textsize, vjust = 0.5),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize))
+
+pi_plot_box
+
+
+feat_div_box <- (feature_plot_box + theme(axis.text.x = element_blank())) / (pi_plot_box + theme(strip.text.x = element_blank())) + (diverg_plot_box + theme(legend.position = "none", strip.text.x = element_blank())) + plot_layout(heights = c(2,1,2))
+
+
+
+ggsave(feat_div_box, filename="plots/feat_box_fission_fusion.pdf", height = 12, width = 4)
+
+```
+
+
+```{r}
+
+# Source - https://stackoverflow.com/a/74895850
+# Posted by Trang Q. Nguyen, modified by community. See post 'Timeline' for change history
+# Retrieved 2026-06-02, License - CC BY-SA 4.0
+
+GeomSplitViolin <- ggplot2::ggproto(
+    "GeomSplitViolin",
+    ggplot2::GeomViolin,
+    draw_group = function(self,
+                          data,
+                          ...,
+                          # add the nudge here
+                          nudge = 0,
+                          draw_quantiles = NULL) {
+        data <- transform(data,
+                          xminv = x - violinwidth * (x - xmin),
+                          xmaxv = x + violinwidth * (xmax - x))
+        grp <- data[1, "group"]
+        newdata <- plyr::arrange(transform(data,
+                                           x = if (grp %% 2 == 1) xminv else xmaxv),
+                                 if (grp %% 2 == 1) y else -y)
+        newdata <- rbind(newdata[1, ],
+                         newdata,
+                         newdata[nrow(newdata), ],
+                         newdata[1, ])
+        newdata[c(1, nrow(newdata)-1, nrow(newdata)), "x"] <- round(newdata[1, "x"])
+
+        # now nudge them apart
+        newdata$x <- ifelse(newdata$group %% 2 == 1,
+                            newdata$x - nudge,
+                            newdata$x + nudge)
+
+        if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+
+            stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <= 1))
+
+            quantiles <- ggplot2:::create_quantile_segment_frame(data,
+                                                             draw_quantiles)
+            aesthetics <- data[rep(1, nrow(quantiles)),
+                               setdiff(names(data), c("x", "y")),
+                               drop = FALSE]
+            aesthetics$alpha <- rep(1, nrow(quantiles))
+            both <- cbind(quantiles, aesthetics)
+            quantile_grob <- ggplot2::GeomPath$draw_panel(both, ...)
+            ggplot2:::ggname("geom_split_violin",
+                             grid::grobTree(ggplot2::GeomPolygon$draw_panel(newdata, ...),
+                                            quantile_grob))
+        }
+    else {
+            ggplot2:::ggname("geom_split_violin",
+                             ggplot2::GeomPolygon$draw_panel(newdata, ...))
+        }
+    }
+)
+
+geom_split_violin <- function(mapping = NULL,
+                              data = NULL,
+                              stat = "ydensity",
+                              position = "identity",
+                              # nudge param here
+                              nudge = 0,
+                              ...,
+                              draw_quantiles = NULL,
+                              trim = TRUE,
+                              scale = "area",
+                              na.rm = FALSE,
+                              show.legend = NA,
+                              inherit.aes = TRUE) {
+
+    ggplot2::layer(data = data,
+                   mapping = mapping,
+                   stat = stat,
+                   geom = GeomSplitViolin,
+                   position = position,
+                   show.legend = show.legend,
+                   inherit.aes = inherit.aes,
+                   params = list(trim = trim,
+                                 scale = scale,
+                                 # don't forget the nudge
+                                 nudge = nudge,
+                                 draw_quantiles = draw_quantiles,
+                                 na.rm = na.rm,
+                                 ...))
+}
+
+
+```
+
+```{r}
+
+
+
+
+feature_df %>%
+  ggplot() +
+    geom_split_violin(aes(x=reorder(categories, value, median), y=value, fill=genome, colour=genome), alpha = 0.6, nudge = 0.02) +
+  #geom_point(aes(x=categories, y=value, colour=genome)) +
+  stat_summary(
+    fun = median,
+    geom = "crossbar",
+    aes(x=reorder(categories, value, median), y=value, group = interaction(feature, genome)),
+    width = 0.5,
+    color = "black",
+    linewidth = 0.2,
+    position = position_dodge(width = 0.8)
+  )+
+  facet_wrap(~feature, scales = "free", strip.position = "bottom") +
+  # scale_fill_manual(values = c( "yellow", "grey30", "tan4", "tan1"),
+  #                   name = "Window categories",
+  #                   labels = c("Breakpoint", "Background", "Ancestral event (n5)", "Ancestral event (MRCA, n8)")) +
+  scale_fill_manual(name = "Species", 
+                    values = mec_colors,
+                    labels = c("Mechanitis lysimnia", "Mechanitis polymnia")) +
+  scale_colour_manual(values = mec_colors,
+                    labels = c("Mechanitis lysimnia", "Mechanitis polymnia"),
+                    guide="none") +
+  theme_classic() +
+  theme(strip.text.x.bottom = element_text(size = textsize),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_text(size = textsize),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize))
+
+feature_plot_split_violin
+
+
+```
+
+```{r te_colour}
+te_palette <- c(
+  "Total_repeats" ="black",
+  "LTR"           = "red",
+  "LINE"            = "blue",
+  "DNA"           = "yellow2",
+  "RC"           = "orange",
+  "SINE"          = "lightblue",
+  "Simple_repeat" = "tan",
+  "Low_complexity" = "brown4",
+  "Overlapping"= "lightgrey",
+  "Unknown"       = "grey30"
+)
+```
+
+
+```{r dist_telomere}
+
+
+combined_df_brp %>% filter(feature %in% c("Total_repeats","LTR", "LINE", "DNA", "RC", "Simple_repeat","SINE", "Overlapping", "Low_complexity", "Unknown")) %>%
+ggplot(aes(rel_position, value)) +
+  #geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(aes(colour = feature), se = F) +
+  facet_wrap(~genome) +
+  scale_colour_manual(values = te_palette,
+                    name = "Repeat class") +
+  scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_rpt_", Sys.Date(), ".png", sep = ""),
+       height = 4,
+       width = 8)
+
+
+combined_df_brp %>% filter(feature %in% c("GC","Genes","eig_scores", "Recombination_rate")) %>%
+ggplot(aes(rel_position, value)) +
+  geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(se = F) +
+  facet_wrap(genome~feature,scales = "free", nrow = 2) +
+  #scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_feat_", Sys.Date(), ".png", sep = ""),
+       height = 6,
+       width = 12)
+
+combined_df_brp %>% filter(feature %in% c("pi_Mpol","pi_Mlys","dxy","Fst")) %>%
+ggplot(aes(rel_position, value)) +
+  geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(se = F) +
+  facet_wrap(~genome + feature, ncol = 4, scales = "free_y") +
+  #scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_popgen_", Sys.Date(), ".png", sep = ""),
+       height = 6,
+       width = 12)
+
+
+```
+
+
+
+```{r rec_vs_comp_suppl}
+
+rec_vs_comp.df <- combined_df_brp %>% filter(feature %in% c("Recombination_rate", "eig_scores")) %>% select(-window_id) %>% pivot_wider(names_from = feature, values_from = value)
+
+comp_df_raw$chr <- clean_chr(comp_df_raw$chr)
+
+rec_vs_comp.df <- left_join(rec_vs_comp.df, comp_df_raw %>% select(chr, start, end, compartment, genome))
+
+  
+size_q1 <- size_df %>% filter(genome=="ilMecPoly1") %>% arrange(chr)
+
+# track_df: one row per window
+p_rec <- plot_genome_track(rec_vs_comp.df %>% filter(genome == "ilMecPoly1") %>% select(chr, start, end, Recombination_rate), size_q1,
+  y_col      = "Recombination_rate",
+  #colour_col = "compartment",
+  line       = FALSE,
+  point      = TRUE,
+  loess = TRUE,
+  title = "ilMecPoly1",
+  y_label    = "Recombination rate (cM/Mb)"
+)
+
+p_comp <- plot_genome_track(rec_vs_comp.df %>% filter(genome == "ilMecPoly1") %>% select(chr, start, end, compartment), size_q1,
+  y_col      = "compartment",
+  colour_col = "compartment",
+  line       = FALSE,
+  point      = TRUE,
+  shape = 15,
+  loess = FALSE,
+  y_label    = "Compartment"
+)
+
+size_q2 <- size_df %>% filter(genome=="ilMecLysi212") %>% arrange(chr)
+
+# track_df: one row per window
+p_rec_lys <- plot_genome_track(rec_vs_comp.df %>% filter(genome == "ilMecLysi212") %>% select(chr, start, end, Recombination_rate), size_q2,
+  y_col      = "Recombination_rate",
+  #colour_col = "compartment",
+  line       = FALSE,
+  point      = TRUE,
+  loess = TRUE,
+  title = "ilMecLysi212",
+  y_label    = "Recombination rate (cM/Mb)"
+)
+
+p_comp_lys <- plot_genome_track(rec_vs_comp.df %>% filter(genome == "ilMecLysi212") %>% select(chr, start, end, compartment), size_q2,
+  y_col      = "compartment",
+  colour_col = "compartment",
+  line       = FALSE,
+  point      = TRUE,
+  shape = 15,
+  loess = FALSE,
+  y_label    = "Compartment"
+)
+
+ggarrange(p_rec, p_comp, p_rec_lys, p_comp_lys, ncol = 1, heights = c(2,1, 2, 1), 
+          align = "v", common.legend = T, legend = "bottom")
+
+ggsave(paste("plots/genome_track_rec_vs_comp_", Sys.Date(), ".png", sep = ""),
+             height = 10,
+       width = 20)
+
+
+
+
+
+```
+
+
+
+```{r comp_length}
+
+
+comp_length <- rec_vs_comp.df %>% select(genome, chr, start, end, compartment, Recombination_rate) %>% arrange(genome, chr, start) %>%
+group_by(genome, chr) %>%
+mutate(run_id = cumsum(row_number() == 1 | compartment != lag(compartment))) %>%
+group_by(genome, chr, run_id, compartment) %>%
+summarise(start = min(start),
+          end = max(end),
+          .groups = "drop") %>%
+arrange(genome, chr, start)
+
+comp_length$comp_length <- comp_length$end - comp_length$start
+
+comp_length <- comp_length[, c("genome", "chr", "start", "end", "compartment", "comp_length")]
+
+write_tsv(comp_length, file = "tables/compartment_lengths.bed", col_names = F)
+
+comp_length %>% 
+ggplot(aes(y = compartment)) +
+  geom_segment(
+    aes(x = start, xend = end, yend = compartment, colour = compartment),
+    linewidth = 3,
+    lineend = "butt"
+  ) +
+  facet_wrap(~ genome + chr, scales = "free_x", nrow = 2) +
+  labs(x = "Genomic position", fill = "Compartment") +
+  theme_bw()
+
+compartment_cols <- c(
+  A = "#EEE1A6",
+  B = "cyan4"
+)
+
+compartment_cols <- c(
+  A = "#7570B3",
+  B = "#9CAF88"
+)
+
+# "#7570B3"
+# "#009E73", "#CC79A7"
+# "#66C2A5", "#8DA0CB" | Softer pastel look                         |
+# "#2A9D8F", "#6A4C93" | Slightly more saturated                    |
+# "#7FC97F", "#BEAED4" | Very gentle, publication-friendly          |
+
+
+# excluding the W
+comp_len_distr <- comp_length %>% filter(!is.na(compartment) & !chr %in% c("W", "W1", "W2")) %>% 
+  ggplot(aes(compartment, comp_length/1000000)) +
+  geom_boxplot(aes(fill=compartment), outliers = TRUE, alpha = 0.8, outlier.color = "grey70") +
+  stat_compare_means() +
+  stat_summary(
+    geom = "text",
+    fun.data = function(x) data.frame(y = -Inf, label = paste0("n=", length(x))),
+    size = 5, vjust = -0.5
+  ) +
+  facet_grid(~genome) +
+  scale_y_continuous(#transform = "log10",
+                    name = "Compartment length (Mb)") +
+  scale_fill_manual(name = "Compartment", 
+                    values = compartment_cols) +
+  theme_classic() +
+  theme(axis.title.x = element_blank())
+
+comp_length %>% filter(!is.na(compartment)) %>% 
+  ggplot(aes(comp_length/1000000)) +
+  geom_histogram(aes(fill = compartment), alpha = 0.8, bins = 100) +
+  xlim(0,5) +
+  facet_wrap(~genome)
+
+comp_length %>% group_by(genome, chr, compartment) %>% count()
+comp_length %>% group_by(genome, compartment) %>% count()
+
+ggsave(comp_len_distr, filename = paste("plots/comp_comb_length_box_", Sys.Date(), ".png", sep = ""),
+       height = 4,
+       width = 6)
+  
+```
+
+
+
+```{r rec_comp_violin}
+
+my_labeller_comp1 <- labeller(
+  genome = c(
+    ilMecPoly1   = "italic('Mechanitis polymnia')",
+    ilMecLysi212 = "italic('Mechanitis lysimnia')"
+  ),
+  .default = label_parsed
+)
+rec_comp_plot <- rec_vs_comp.df %>% filter(!is.na(compartment)) %>%
+  ggplot(aes(compartment, Recombination_rate)) +
+  geom_violin(aes(compartment, Recombination_rate, fill = compartment), alpha = 0.8) +
+  geom_boxplot( outliers = FALSE, width = 0.3, fill = "grey90") +
+  stat_compare_means() +
+  facet_grid(~genome, labeller = my_labeller_comp1) +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)") +
+  scale_x_discrete(name = "Compartment") +
+  scale_fill_manual(values = compartment_cols) +
+  theme_classic() + theme(legend.position = "none",
+                          axis.title.x = element_blank(),
+                          axis.text = element_text(size = textsize),
+                          strip.text = element_text(size = textsize))
+  
+
+
+rec_vs_comp.df %>% filter(!is.na(compartment)) %>% group_by(genome, compartment) %>% summarise(median(Recombination_rate, na.rm = T))
+
+
+```
+
+
+
+
+```{r compartment_vs_breakpoints}
+library(data.table)
+
+# Expected columns:
+# roi_df:  chr, start, end, type
+# feat_df: chr, start, end, feature  (values: "A", "B")
+
+roi_df <- break_df %>% select(chr, start, end, type, event_timing, genome)
+feat_df <- comp_length
+
+setDT(roi_df);  setDT(feat_df)
+roi_df[, roi_id := .I]  # unique ID per ROI
+
+hits <- roi_df[feat_df,
+               on = .(genome, chr, start < end, end > start),
+               nomatch = NULL,
+               .(roi_id = x.roi_id, genome = x.genome, chr=x.chr, start=x.start, type = x.type, event_timing = x.event_timing, feature = i.compartment)]
+
+roi_features <- hits[, .(features = list(sort(unique(feature)))), by = .(roi_id, type, event_timing, genome, chr)]
+roi_features[, overlap_class := fcase(
+  sapply(features, function(f) identical(f, "A")),        "A",
+  sapply(features, function(f) identical(f, "B")),        "B",
+  sapply(features, function(f) all(c("A", "B") %in% f)), "A or B",
+  default = "other"
+)]
+
+
+write.csv(as.data.frame(roi_features[,-6]), file = paste("tables/breakpoints_and_compartments_", Sys.Date(), ".csv", sep = ""), quote = F, row.names = F)
+
+
+result <- roi_features[, .N, by = .(genome, type, event_timing, overlap_class)]
+dcast(result, type ~ overlap_class, value.var = "N", fill = 0)
+
+brp_comp_plot_all <- ggplot(result, 
+                        aes(x = event_timing, y = N, fill = overlap_class)) +
+  geom_col(alpha = 0.7) +
+  scale_fill_manual(
+    values = c(compartment_cols,
+      "A or B" = "grey70"
+    ),
+    name = "Overlaps"
+  ) +
+  labs(x = "ROI type", y = "Count") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(brp_comp_plot_all, filename = paste("plots/comp_comb_brp_all_", Sys.Date(), ".png", sep = ""),
+       height = 8,
+       width = 12)
+
+
+my_labeller_barplot <- labeller(
+  event_timing = c(
+    focal   = "Breakpoints",
+    anc_proxy = "Anc. proxy"
+  ))
+```
+
+
+```{r E3}
+
+combined_df_brp %>% filter(feature=="E3") %>% 
+  ggplot() + 
+  geom_point(aes(start/1000000, value, colour=value < 0), size = 0.1, show.legend = FALSE) + 
+  geom_vline(data=combined_df_brp %>% filter(feature=="E3" & !type %in% c("Complex", "colinear") & event_timing %in% c("focal")),
+             mapping = aes(xintercept=start/1000000, linetype = event_timing), colour = "grey40") +
+  facet_wrap(~genome + chr, scales = "free_x", nrow = 2) +
+  scale_y_continuous(name = "E3") +
+  scale_x_continuous(name = "Genomic position (Mb)") +
+  scale_linetype_manual(name = "Breakpoints", 
+                        values = c("solid"),
+    labels = c("Breakpoints")) +
+    theme(strip.background = element_rect(fill = "grey90", colour = "grey90"),
+        strip.text = element_text(size = textsize),
+        axis.text.x = element_text(size = textsize),
+        axis.text.y = element_text(size = textsize),
+        axis.title.x = element_text(size = textsize),
+        axis.title.y = element_text(size = textsize, angle = 0, vjust = 0.5),
+        panel.background = element_rect(colour = "black", fill = "transparent"),
+        panel.grid.major = element_line(colour = "grey90")
+        )
+
+ggsave(paste("plots/E3_vs_breakpoints_", Sys.Date(), ".pdf", sep = ""),
+       height = 8,
+       width = 24)
+
+```
+
+
+```{r compartment_vs_breakpoints_plot}
+brp_comp_sum <- result %>% filter(event_timing %in% c( "focal", "anc_proxy")) 
+
+brp_comp_sum$event_timing <- factor(brp_comp_sum$event_timing,
+levels = c( "focal", "anc_proxy"))
+
+brp_comp_plot <- ggplot(brp_comp_sum, 
+                        ) +
+  geom_bar(aes(x = type, y = N, fill = overlap_class), stat = "identity", alpha = 0.8) +
+  facet_wrap(~event_timing, labeller = my_labeller_barplot) +
+  scale_fill_manual(values = c(compartment_cols,
+      "A or B" = "grey70"
+    ),
+    name = "Compartment"
+  ) +
+  labs(x = "", y = "Breakpoints (count)") +
+  scale_x_discrete(labels = c("Fiss.", "Fiss.-fus.", "Fus.")) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = textsize),
+        legend.position = "inside",
+        legend.position.inside = c(.4,.80),
+        legend.text = element_text(size = textsize),
+        legend.title = element_text(size = textsize),
+        axis.text.x = element_text(size = textsize),
+        axis.text.y = element_text(size = textsize),
+        axis.title.y = element_text(size = textsize),
+        )
+
+brp_comp_plot
+```
+
+```{r comp_vs_breakpoint}
+
+
+# ilMecPoly1
+# 11
+# 5360096
+# 5365971
+# anc_proxy
+# fusion
+# A
+# 
+# ilMecLysi2… 13    7.1 e6 7.20e6 7192328 7.39e6 focal        fusi…   12790513    7150000   5640513
+# 2 ilMecLysi2… 13    7.20e6 7.3 e6 7192328 7.39e6 focal        fusi…   12790513    7250000   5540513
+# 3 ilMecLysi2… 13    7.3 e6 7.4 e6 7192328 7.39e6 focal        fusi…   12790513    7350000   5440513
+# rec_vs_comp.df %>% 
+# +     filter(event_timing == "focal" & chr == "13") %>% select(compartment)
+# # A tibble: 3 × 1
+#   compartment
+#   <chr>      
+# 1 A          
+# 2 B          
+# 3 B          
+# 
+# 
+# ilMecLysi212
+# 04
+# 11195219
+# 11223413
+# anc_proxy
+# fission-fusion
+# A
+# 
+# ilMecPoly1  11    5.3 e6 5.40e6 5360096 5.37e6 focal        fiss…   16717337    5350000   5350000 A ilMecPoly1  03 all B
+
+
+
+```
+
+
+```{r plot_pc2}
+
+# combined_df_brp %>% filter(feature %in% c("E2_corr", "Recombination_rate","Total_repeats", "GC", "Genes")) %>% filter(!chr %in% c("Z","Z1","Z2","W", "W1")) %>% #filter(genome == "ilMecPoly1") %>%
+#   ggplot(aes(rel_position, value), colour = "grey") + 
+#   geom_line(aes(rel_position, value)) + 
+#   geom_smooth(aes(rel_position, value)) +
+#   facet_wrap(~feature, scales = "free_y", nrow = 4) 
+
+end_interactions_df <- combined_df_brp %>% filter(feature %in% c("E2_corr", "Recombination_rate","Total_repeats", "GC", "Genes")) %>% filter(!chr %in% c("Z","Z1","Z2","W", "W1")) 
+
+end_interactions_df$feature <- factor(end_interactions_df$feature,
+levels = c("Recombination_rate","Total_repeats","Genes", "GC", "E2_corr"))
+
+end_interactions_df <- end_interactions_df %>% mutate(value=case_when(feature %in% c("Total_repeats", "GC", "Genes") ~ value*100,
+                                                           TRUE ~ value))
+
+my_labeller_ends <- as_labeller(c(Recombination_rate="Recomb. rate (cM/Mb)", Total_repeats="Total repeats (%)", GC="GC-content (%)", Genes="CDS content (%)", E2_corr="Interaction (PC2)")
+                           )
+textsize=12
+end_plot <- end_interactions_df %>% 
+  ggplot(aes(rel_position, value)) + 
+  geom_line(aes(rel_position, value), colour = "grey70") + 
+  geom_smooth(aes(rel_position, value), colour = "grey30", span=0.01) +
+  facet_wrap(~feature, scales = "free_y", nrow = 5, 
+             strip.position = "left", labeller = my_labeller_ends) +
+  scale_x_continuous(name = "Relative distance from telomere") +
+  theme(axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text = element_text(size = textsize),
+        axis.text.x = element_text(size = textsize),
+        axis.text.y = element_text(size = textsize),
+        axis.title.x = element_text(size = textsize),
+        panel.background = element_rect(colour = "black", fill = "transparent"),
+        panel.grid.major = element_line(colour = "grey90")
+        )
+
+end_plot
+ggsave(filename = paste("plots/PC2_rec_rate_rpt_gc", Sys.Date(), ".pdf"),
+       width = 6,
+       height = 10)
+
+end_interactions_df %>% select(-window_id) %>% pivot_wider(names_from = feature, values_from = value) %>%
+  ggplot(aes(Recombination_rate, E2_corr)) +
+  geom_point() +
+  geom_smooth() +
+  stat_cor(method = "spearman", cor.coef.name = "rho") +
+  theme_classic()
+
+
+
+```
+
+```{r combined_comp_plot}
+
+comb_plot_fig3 <-  ggarrange(ggarrange(feat_div_box, (end_plot + theme(plot.margin = margin(30, 5, 0, 5))),
+                                     nrow = 1, widths = c(1.5,1)),
+          ggarrange(rec_comp_plot + theme(plot.margin = margin(5, 5, 10, 5)), (brp_comp_plot + theme(plot.margin = margin(5, 5, 0, 5))), nrow = 1, widths = c(1.5,1)),
+          nrow = 2,
+          heights = c(1.8,1),
+          align = "v"
+          )
+
+ggsave(filename = paste("plots/fig3_", Sys.Date(), ".pdf", sep = ""),
+comb_plot_fig3,
+  height = 14,
+  width = 12)
+  
+
+
+
+```
+
+
+
+```{r compartment_conservation_genomes}
+taxa1 = "Mechanitis polymnia"
+taxa2 = "Mechanitis lysimnia"
+
+my_labeller_comp2 <- labeller(
+  species = c(
+    ilMecPoly1   = "italic('Mechanitis polymnia')",
+    ilMecLysi212 = "italic('Mechanitis lysimnia')"
+  ),
+  .default = label_parsed
+)
+
+bin_data <- read.csv(paste("overlapping_compartments", REF, QUERY, Sys.Date(), "_table.csv", sep = ""))
+
+pol_df <- rec_vs_comp.df %>% 
+             filter(genome == "ilMecPoly1" & event_timing == "focal") %>% add_column(species = "ilMecPoly1") %>% dplyr::rename(chrom=chr) 
+
+lys_pol_ref_df <- rec_vs_comp.df %>% 
+             filter(genome == "ilMecPoly1" & event_timing == "anc_proxy") %>% add_column(species = "ilMecLysi212") %>% dplyr::rename(chrom=chr) %>% rbind(pol_df)
+
+lys_pol_ref_df$species <- factor(lys_pol_ref_df$species, levels = c("ilMecPoly1", "ilMecLysi212"))
+
+p <- ggplot(bin_data) +
+  geom_rect(
+    aes(xmin = x_start, xmax = x_end,
+        ymin = 0,        ymax = 1,
+        fill = comp_clean),
+    colour = NA, alpha = 0.7
+  ) +
+  geom_vline(data = lys_pol_ref_df,
+    aes(xintercept = (start + end)/2000000),
+        linewidth = 1, colour = "black") +
+  scale_fill_manual(
+    values   = c("red2", "royalblue", "#B0C4DE"),
+    #labels   = TRACK_LABELS,
+    name     = "Compartment",
+    na.value = "grey92"
+  ) +
+  scale_x_continuous(
+    #labels = function(x) paste0(x, " Mb"),
+    #expand = c(0.005, 0)
+  ) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(species ~ chrom, scales = "free_x", space = "free_x", switch = "both", labeller = my_labeller_comp2) +
+  labs(
+    # title    = paste("Compartment conservation:", REF, "vs", QUERY, sep = " "),
+    # subtitle = paste0(
+    #   "Compartments lifted via synteny blocks | bin size = ",
+    #   BIN_SIZE / 1000, " kb | grey = no data"
+    # ),
+    x =  bquote("Position in" ~ italic(.(taxa1)) ~ "genome (Mb)"),
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid      = element_blank(),
+    panel.border    = element_rect(colour = "grey40", fill = NA, linewidth = 0.5),
+    axis.text.y     = element_blank(),
+    axis.ticks.y    = element_blank(),
+    axis.text.x     = element_blank(),
+    axis.title.x     = element_text(size = textsize),
+    strip.text.x    = element_text(size = textsize),
+    strip.text.y    = element_text(size = textsize, angle = 0),
+    legend.position = "bottom",
+    legend.key.size = unit(0.5, "cm"),
+    legend.text     = element_text(size = 8),
+    #plot.title      = element_text(face = "bold", size = 13),
+    #plot.subtitle   = element_text(size = 9, colour = "grey40"),
+    plot.margin     = margin(10, 10, 10, 10)
+  )
+
+p
+ggarrange(
+  ggarrange(brp_comp_plot  + theme(legend.position = "none"),
+            rec_comp_plot  + theme(legend.position = "none"),
+            legend_comp, 
+            nrow = 1, labels = c("A", "B"), widths = c(1,1,0.3)),
+  p + theme(legend.position = "none", plot.margin = margin(t=20,r=1,b=1,l=20)), nrow = 2, labels = c("", "C"))
+
+ggsave(paste("plots/comp_comb_", Sys.Date(), ".png", sep = ""),
+       height = 12,
+       width = 16)
+
+
+```
+
+

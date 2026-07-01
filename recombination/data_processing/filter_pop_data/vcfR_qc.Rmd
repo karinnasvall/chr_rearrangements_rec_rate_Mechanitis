@@ -1,0 +1,739 @@
+---
+title: "vcfqc"
+author: "KNasvall"
+date: "2026-01-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup2, echo=FALSE}
+#install.packages("vcfR")
+library(vcfR)
+library(tidyverse)
+```
+
+## Quality control of VCF files
+
+Based on https://knausb.github.io/vcfR_documentation/quick_intro.html#Output_of_data
+
+The vcf-files are thinned with bcftools using the following parameters:
+
+
+```{r bash, echo=TRUE, eval=FALSE}
+bcftools view -v snps ${file} | bcftools +prune -w 10000bp -n 1 -N rand --output ${OUT_FILE%.*}_thin_snps.vcf.gz -Oz
+```
+
+```{r getdata}
+WD="/lustre/scratch125/tol/teams/meier/users/kn9/recombination/rawdata_to_vcf/04_vcf_filtering/polymnia/01_vcf_qc"
+
+VCF_FILE="vcf_thinned/vcf_thin_all_snps.vcf.gz"
+
+#FASTA="/lustre/scratch125/tol/teams/meier/users/kn9/recombination/rawdata_to_vcf/03_variant_call_lysimnia_rptmask/ref/ilMecLysi212_1.renamed.masked.fa.gz"
+
+OUTPUT_DIR=WD
+# crashed when trying to read in a small chr vcf file, use thinned files
+#vcf_thin_pca.bsub # thinning with bcftools
+
+# inspired from CAM0707355
+col_pal_mechanitis <- c("orange3","#8A5628", "gold2", "#2D1A12","#807267", "#9E8757","#D6D5D6", "white")
+
+text_size=20
+
+```
+
+```{r read_data, echo=FALSE}
+vcf <- read.vcfR(VCF_FILE)
+#vcf
+
+# only retain non indels, not needed the thinning only include snps
+# vcf2 <- extract.indels(vcf)
+
+# only biallelic
+vcf <- vcf[is.biallelic(vcf),]
+vcf
+
+# only needed if want to use chromosome functions
+# dna <- ape::read.dna(FASTA, format = "fa")
+# dna
+```
+
+
+```{r summary_vcf, echo=FALSE, eval=FALSE}
+vcf
+# just print a summary, underestimate missing data (all fields NA, so if something is recorded it will not count as missing even if ./.)
+head(vcf) # summarize each section of the object
+
+# vcf@meta # header content from the vcf file
+# #summarisies the meta
+# queryMETA(vcf)
+# queryMETA(vcf, element = 'DP')
+# 
+# head(vcf@fix) # table with the first 8 columns of the vcf 
+# head(getFIX(vcf)) #(the INFO col is suppressed, to make it more manageble)
+# 
+# vcf@gt[1:6, 1:4] # genotype and sample info, this showes first 6 variants of first 4 columns (FORMAT and the first 3 samples)
+```
+
+```{r funct_He_MAF_EHET, echo=FALSE} 
+# Function computing minimum allele frequency per site, expected heterozygosity, and expected number of heterozygous sites per sample. The output are three named lists
+#
+compute_He_MAF_EHET <- function(gt) {
+  # number of called genotypes per site
+  n_called <- rowSums(!is.na(gt))
+
+  # reference allele count
+  ref_alleles <- rowSums(
+    ifelse(gt == "0/0", 2,
+           ifelse(gt == "0/1" | gt == "1/0", 1, 0)),
+    na.rm = TRUE
+  )
+  
+  # alternate allele count
+  alt_alleles <- rowSums(
+    ifelse(gt == "1/1", 2,
+           ifelse(gt == "0/1" | gt == "1/0", 1, 0)),
+    na.rm = TRUE
+  )
+  
+  # allele frequencies
+  p <- ref_alleles / (2 * n_called)
+  q <- alt_alleles / (2 * n_called)
+  
+  # expected heterozygosity per site
+  He <- 2 * p * q
+  
+  # minor allele frequency
+  MAF <- pmin(p, q)
+  
+  # expected heterozygous sites per sample
+  E_HET <- sapply(seq_len(ncol(gt)), function(j) {
+    sum(He[!is.na(gt[, j])], na.rm = TRUE)
+  })
+  names(E_HET) <- colnames(gt)
+  
+  return(list(
+    He = He,
+    MAF = MAF,
+    E_HET = E_HET
+  ))
+}
+
+
+
+
+```
+
+
+
+```{r chrom_object, eval=FALSE, echo=FALSE}
+#Skipping the chrom object can only read one chr at the time
+chrom <- create.chromR(name = 'test_lysimnia',
+                       vcf = vcf, 
+                       seq = dna)
+
+```
+
+
+```{r plot_chrom, eval=FALSE, echo=FALSE}
+plot(chrom)
+
+```
+
+```{r chromoqc, eval=FALSE, echo=FALSE}
+chromoqc(chrom)
+```
+
+```{r process_chrom, eval=FALSE, echo=FALSE}
+chrom <- proc.chromR(chrom, verbose = TRUE, win.size = 100000)
+chromoqc(chrom)
+plot(chrom)
+```
+
+
+## Variant based statistics
+
+Variant quality, depth, missingness and minimum allele frequency (MAF)
+
+### Variant quality     
+
+```{r variant_quality, echo=FALSE}
+
+DP <- getFIX(vcf, getINFO = TRUE)
+df <- as.data.frame(DP, stringsAsFactors = FALSE)
+
+df2 <- df[, c("CHROM", "POS", "QUAL")]
+df2$POS <- as.numeric(df2$POS)
+df2$QUAL <- as.numeric(df2$QUAL)
+
+df2$CHROM <- sub("SUPER_", "", df2$CHROM)
+# zeropad
+pad_numbers <- function(x, width = 2) {
+  is_num <- grepl("^\\d+$", x)          # TRUE for only digits
+  x[is_num] <- sprintf(paste0("%0", width, "d"), as.integer(x[is_num]))
+  x
+}
+
+df2$CHROM <- pad_numbers(df2$CHROM, width = 2)
+
+
+p <- df2 %>%
+  ggplot() +
+  geom_point(aes(POS/1000000, QUAL), colour = col_pal_mechanitis[2], alpha = 0.5, size = 0.5) +
+  facet_wrap(~CHROM) +
+  scale_x_continuous(name = "Position (Mb)") +
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(colour = "grey"), 
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+p
+
+df2 %>%
+  ggplot() +
+  geom_histogram(aes(QUAL), colour = col_pal_mechanitis[4], fill = col_pal_mechanitis[2], alpha = 0.5) +
+  facet_wrap(~CHROM) +
+  #scale_x_continuous(limits = c(0,100)) +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+df2 %>%
+  ggplot() +
+  geom_histogram(aes(QUAL), colour = col_pal_mechanitis[4], fill = col_pal_mechanitis[2], alpha = 0.5) +
+  facet_wrap(~CHROM) +
+  scale_x_continuous(limits = c(0,100), name = "QUAL, capped to 100") +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+
+
+```
+
+
+
+### Variant depth
+
+```{r var_depth,  echo=FALSE}
+
+df2$INFO_DP <- as.numeric(sub(".*DP=([0-9]+).*", "\\1", df$INFO))
+
+df2 %>%
+  ggplot() +
+  geom_histogram(aes(INFO_DP), colour = col_pal_mechanitis[4], fill = col_pal_mechanitis[2], alpha = 0.5) +
+  facet_wrap(~CHROM) +
+  #scale_x_continuous(limits = c(0,2000)) +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank(),
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+print("Summary INFO/DP:")
+summary(df2$INFO_DP)
+
+df2 %>%
+  ggplot() +
+  geom_histogram(aes(INFO_DP), colour = col_pal_mechanitis[4], fill = col_pal_mechanitis[2], alpha = 0.5) +
+  facet_wrap(~CHROM) +
+  scale_x_continuous(name = "INFO_DP, capped to 3*median",
+                     limits = c(0,median(df2$INFO_DP)*3)) +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank(),
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+
+df2 %>%
+  ggplot() +
+  geom_point(aes(POS/1000000, INFO_DP), colour = col_pal_mechanitis[2], alpha = 0.5) +
+  facet_wrap(~CHROM) +
+  scale_x_continuous(name = "Position (Mb)") +
+  scale_y_continuous(limits = c(0,median(df2$INFO_DP)*3)) +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank(),
+        strip.background = element_rect(fill = col_pal_mechanitis[7]))
+
+
+
+
+
+
+```
+
+
+### Variant missingness
+
+https://knausb.github.io/vcfR_documentation/missing_data.html
+
+
+```{r miss_hist_sites, echo=FALSE}
+gt_mat <- extract.gt(vcf, element = "GT")
+
+varMiss <- apply(gt_mat, MARGIN = 1, function(x){ sum(is.na(x)) })
+varMiss <- varMiss/ncol(vcf@gt[,-1])
+
+hist(varMiss, col = "gold3", xlab = "Missingness (%)")
+
+```
+
+
+
+### Variant MAF
+
+```{r variant_MAF, echo=FALSE}
+
+gt <- extract.gt(vcf, element = "GT")
+
+He_MAF_EHET <- compute_He_MAF_EHET(gt)
+
+summary(He_MAF_EHET$MAF)
+hist(He_MAF_EHET$MAF, col = "gold3", xlab = "Minimum allele frequency", breaks = 1000, xlim = c(0,0.01))
+
+
+print("Recommended MAF if at least present in two haplotypes in the sample: ")
+2/(length(gt[1,])*2)
+
+```
+
+
+
+## Individual-based metrics
+
+Genotype quality, depth, missingness (missing sites per individual), F (inbreeding coefficient)
+
+### Genotype quality
+
+```{r GQ, echo=FALSE}
+
+gq <- extract.gt(vcf, element = "GQ", as.numeric = T)
+
+# remove missing sites
+gq[gt == "./." | is.na(gt)] <- NA
+
+
+gq.df <- as.data.frame(gq)
+gq.df$variant_id <- rownames(gq)
+gq.df$CHROM <- sapply(str_split(gq.df$variant_id, "_"), `[`, 2)
+
+# zeropad
+pad_numbers <- function(x, width = 2) {
+  is_num <- grepl("^\\d+$", x)          # TRUE for only digits
+  x[is_num] <- sprintf(paste0("%0", width, "d"), as.integer(x[is_num]))
+  x
+}
+
+gq.df$CHROM <- pad_numbers(gq.df$CHROM, width = 2)
+
+
+gq.df$POS <- sapply(str_split(gq.df$variant_id, "_"), `[`, 3)
+gq.df$POS <- as.numeric(gq.df$POS)
+
+
+gq.df <- gq.df %>% pivot_longer(
+    cols = -c(variant_id,CHROM,POS),
+    names_to = "sample",
+    values_to = "quality"
+  ) %>% 
+  group_by(sample) %>%
+  mutate(med_gq = median(quality, na.rm = TRUE))
+
+summary(gq.df$quality)
+
+print("Samples with median GQ<30:")
+unique(gq.df[gq.df$med_gq<30,"sample"])
+
+
+hist(gq.df$quality, col = "#D6D5D6", xlab = "Genotype quality", breaks = 100)
+
+gq.df %>%
+  ggplot() +
+  #geom_violin(aes(sample, depth)) +
+  geom_boxplot(aes(reorder(sample, med_gq, decreasing = T), quality, fill = med_gq<30 ), outliers = FALSE) +
+  #geom_point(aes(sample, depth), alpha = 0) +
+  scale_y_continuous(#position = "right",
+                     #limits = c(0,50),
+                     name = "Quality") +
+  scale_fill_manual(values = c(col_pal_mechanitis[7], "orange")) +
+  coord_flip() +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank())
+
+
+```
+
+
+
+### Individual depth
+```{r ind_depth, echo = FALSE}
+dp <- extract.gt(vcf, element = "DP", as.numeric=TRUE)
+
+# remove missing sites
+#dp[gt == "./." | is.na(gt)] <- NA
+
+dp.df <- as.data.frame(dp)
+dp.df$variant_id <- rownames(dp)
+dp.df$CHROM <- sapply(str_split(dp.df$variant_id, "_"), `[`, 2)
+
+# zeropad
+pad_numbers <- function(x, width = 2) {
+  is_num <- grepl("^\\d+$", x)          # TRUE for only digits
+  x[is_num] <- sprintf(paste0("%0", width, "d"), as.integer(x[is_num]))
+  x
+}
+
+dp.df$CHROM <- pad_numbers(dp.df$CHROM, width = 2)
+
+
+dp.df$POS <- sapply(str_split(dp.df$variant_id, "_"), `[`, 3)
+dp.df$POS <- as.numeric(dp.df$POS)
+
+
+dp.df <- dp.df %>% pivot_longer(
+    cols = -c(variant_id,CHROM,POS),
+    names_to = "sample",
+    values_to = "depth"
+  ) %>% 
+  group_by(sample) %>%
+  mutate(med_dp = median(depth, na.rm = TRUE))
+
+hist(dp.df$depth, col = "#807267", xlab = "Individual depth", breaks = 100)
+
+
+dp.df %>%
+  ggplot() +
+  #geom_violin(aes(sample, depth)) +
+  geom_boxplot(aes(reorder(sample, med_dp, decreasing = T), depth, fill = med_dp<6 ), outliers = FALSE) +
+  #geom_point(aes(sample, depth), alpha = 0) +
+  scale_y_continuous(name = "Depth") +
+  scale_fill_manual(values = c(col_pal_mechanitis[5], "orange")) +
+  coord_flip() +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank())
+
+
+dp.df %>% filter(med_dp<10) %>%
+  ggplot() +
+  #geom_violin(aes(sample, depth)) +
+  geom_boxplot(aes(reorder(sample, med_dp, decreasing = T), depth, fill = med_dp<6 ), outliers = FALSE) +
+  #geom_point(aes(sample, depth), alpha = 0) +
+  scale_y_continuous(#position = "right",
+                     #limits = c(0,50),
+                     name = "Depth, samples DP<10") +
+  scale_fill_manual(values = c(col_pal_mechanitis[5], "orange")) +
+  coord_flip() +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank())
+
+# if many ind this is not informative
+# d <- ggExtra::ggMarginal(size = 8,
+#                     d, type = "density", 
+#                     margins = "x",
+#                     fill = col_pal_mechanitis[5],
+#                     alpha = 0.5)
+
+
+write.csv((dp.df %>% select(sample, med_dp) %>% distinct()), 
+          paste(OUTPUT_DIR, "/tables/median_depth_per_sample.txt", sep = ""),
+          quote = F, row.names = F)
+summary(dp.df$depth)
+print("Samples to potentially exclude with low depth (<6):")
+dp.df %>% filter(med_dp<6) %>% select(sample, med_dp) %>% distinct()
+
+```
+
+```{r idepth_normalised, echo=FALSE}
+
+head(dp.df)
+
+auto_medians <- aggregate(
+    depth ~ sample,
+    data = dp.df[!grepl("^[ZW]", dp.df$CHROM), ],
+    FUN = median,
+    na.rm = TRUE
+)
+
+dp_norm.df <- merge(dp.df, auto_medians, by = "sample",
+            suffixes = c("", "_auto_median"))
+
+dp_norm.df <- dp_norm.df %>% 
+  group_by(sample, CHROM) %>%
+  mutate(med_dp_chr=median(depth, na.rm = T)) %>%
+  mutate(depth_norm = med_dp_chr/depth_auto_median)
+
+dp_norm.df %>% select(sample, depth_norm, CHROM) %>% distinct() %>%
+  ggplot() +
+  geom_point(aes(sample, depth_norm), colour = col_pal_mechanitis[5]) +
+  scale_y_continuous(name = "Depth (normalised)") +
+  scale_y_continuous(name = paste("Sample (", length(dp_norm.df$sample %>% unique()), " individuals)", sep = "")) +
+  #scale_fill_manual(values = c(rep(col_pal_mechanitis, 6))) +
+  #coord_flip() +
+  facet_wrap(~CHROM) +
+  theme_classic() +
+  theme(axis.text.x = element_blank())
+
+
+
+#select potential males
+threshold <- 0.75
+
+high_dp_samples <- dp_norm.df %>% select(sample, depth_norm, CHROM) %>% distinct() %>%
+  filter(CHROM %in% c("Z", "Z1")) %>%
+  filter(depth_norm > threshold)
+
+print("Number of potential males, samples with normalised coverage > 0.75:")
+length(high_dp_samples$sample)
+
+write.csv(high_dp_samples, paste(OUTPUT_DIR, "/tables/potential_males.csv", sep = ""), quote = FALSE, 
+            row.names = F)
+
+
+
+```
+
+
+### Individual missingness
+
+```{r miss_ind, echo=FALSE}
+
+indMiss <- apply(gt_mat, MARGIN = 2, function(x){ sum(is.na(x)) })
+indMiss <- indMiss/nrow(vcf)
+
+indMiss.df <- as.data.frame(indMiss)
+indMiss.df$sample <- rownames(indMiss.df)
+
+summary(indMiss.df)
+
+p <- indMiss.df %>%
+  ggplot() +
+  geom_bar(aes(reorder(sample, indMiss, decreasing = T),indMiss*100), fill = "gold3", colour = "grey",  stat="identity") +
+  geom_point(aes(reorder(sample, indMiss, decreasing = T),indMiss*100) , alpha = 0) +
+  scale_y_continuous(#position = "right",
+                     #limits = c(0,50),
+                     name = "Missingness (%)") +
+  #scale_fill_manual(values = rep(col_pal_mechanitis, 7)) +
+  coord_flip() +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "grey"), 
+        axis.title.y = element_blank(),
+        legend.position = "None")
+
+
+p <- ggExtra::ggMarginal(p, type = "density", 
+                    margins = "x",
+                    fill = "gold3",
+                    alpha = 0.5,
+                    size = 8)
+
+
+
+indMiss.df %>% filter(indMiss > 0.05) %>%
+  ggplot() +
+  geom_bar(aes(reorder(sample, indMiss, decreasing = T),indMiss*100), fill = "gold3", colour = "grey",  stat="identity") +
+  geom_point(aes(reorder(sample, indMiss, decreasing = T),indMiss*100) , alpha = 0) +
+  scale_y_continuous(#position = "right",
+                     #limits = c(0,50),
+                     name = "Missingness (%), > 0.05",
+                     breaks = seq(10, 100, 10)) +
+  #scale_fill_manual(values = rep(col_pal_mechanitis, 7)) +
+  coord_flip() +
+  theme_classic() +
+  theme(panel.grid.major.x = element_line(colour = "darkgrey"),
+        axis.title.y = element_blank(),
+        legend.position = "None")
+
+print("Potential individuals to remove:")
+indMiss.df %>% filter(indMiss > 0.2)
+
+```
+
+
+
+### Heterozygosity
+
+```{r heterozygosity, echo=FALSE}
+
+# Expected heterozygosity
+gt <- extract.gt(vcf, element = "GT")
+He_MAF_EHET <- compute_He_MAF_EHET(gt)
+
+
+# Observed heterozygosity
+gt <- extract.gt(vcf, element = "GT")
+O_HET <- colSums(is.het(gt, na_is_false = TRUE))
+n_called_sample <- colSums(!is.na(gt))
+Het_prop <- O_HET / n_called_sample
+
+H_prop.df <- data.frame(
+  sample = names(Het_prop),
+ Het_prop = Het_prop
+)
+
+ggplot(H_prop.df, aes(x = sample, y = Het_prop)) +
+  geom_point(fill = col_pal_mechanitis[1], shape = 21, colour="grey") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "None")
+
+
+# Inbreeding coefficient
+F_s <- 1 - (O_HET / He_MAF_EHET$E_HET)
+F_s
+
+summary(F_s)
+
+df_F <- data.frame(
+  sample = names(F_s),
+ F_s = F_s
+)
+
+ggplot(df_F, aes(x = sample, y = F_s)) +
+  geom_col(fill = col_pal_mechanitis[1]) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "None")
+
+ggplot(df_F, aes(x = F_s)) +
+  geom_histogram(binwidth = 0.01) +
+  theme_classic()
+
+
+
+```
+
+
+Population structure
+If you have multiple populations, F can be high because of the Wahlund effect:
+Mixing populations with different allele frequencies → apparent homozygosity excess.
+
+F can be artificially inflated (more homozygotes due to allele dropout) if your VCF has:
+low coverage,lots of missing data, poor SNP calling
+
+These are rules of thumb, not strict cutoffs:
+F	Likely meaning
+0 to 0.05	normal
+0.05 to 0.15	mild inbreeding or structure
+0.15 to 0.30	moderate inbreeding
+> 0.30	high inbreeding or serious data issues
+
+Summary
+F = 0 → random mating (HWE)
+F > 0 → more homozygotes than expected (inbreeding / structure)
+F < 0 → more heterozygotes than expected (outbreeding / admixture)
+
+
+
+### PCA
+
+```{r pca, echo=FALSE}
+library(SNPRelate)
+
+
+VCF_FILE=paste(WD, "/vcf_thinned/vcf_thin_all_snps.vcf.gz", sep = "")
+META="/lustre/scratch125/tol/teams/meier/users/kn9/recombination/rawdata_to_vcf/metadata/formated_metadata_all.csv"
+
+vcf <- read.vcfR(VCF_FILE)
+vcf
+
+# rename CHROM
+vcf@fix[, "CHROM"] <- sub("^SUPER_", "", vcf@fix[, "CHROM"])
+
+VCF_FILE_renamed=paste(WD, "/vcf_thinned/vcf_thin_all_snps_renamed.vcf.gz", sep = "")
+
+# write a new VCF
+write.vcf(vcf, file = VCF_FILE_renamed)
+
+# convert renamed VCF to GDS format
+vcf.fn <- VCF_FILE_renamed
+gds.fn <- paste(OUTPUT_DIR,"/tables/gds_", Sys.Date(), ".fn", sep = "")
+
+snpgdsVCF2GDS(vcf.fn, gds.fn, method="biallelic.only")
+snpgdsSummary(gds.fn)
+
+# open GDS
+genofile <- snpgdsOpen(gds.fn)
+
+
+# LD-pruning
+snpset <- snpgdsLDpruning(genofile, ld.threshold=0.2)
+str(snpset)
+
+# Get all selected snp id
+snpset.id <- unlist(unname(snpset))
+head(snpset.id)
+
+# run PCA
+pca <- snpgdsPCA(genofile, snp.id=snpset.id, num.thread=2)
+
+# variance proportion (%)
+pc.percent <- pca$varprop*100
+head(round(pc.percent, 2))
+
+# make a data.frame
+tab <- data.frame(sample.id = pca$sample.id,
+    EV1 = pca$eigenvect[,1],    # the first eigenvector
+    EV2 = pca$eigenvect[,2],    # the second eigenvector
+    stringsAsFactors = FALSE)
+head(tab)
+
+tab$sample.id <- sub("_Mechanitis_polymnia", "", tab$sample.id)
+tab$sample.id <- sub("^[0-9]+-", "", tab$sample.id)
+
+metadata <- read.csv(META, header = TRUE, sep = ",", na.strings = c("NA", ""))[,1:4]
+#colnames(metadata) <- c("sample.id", "species", "subspecies", "Country")
+metadata$Country <- toupper(metadata$Country)
+
+
+tab2 <- left_join(tab, metadata, by = c("sample.id"="CAMID"))
+
+
+# inspired from CAM0707355
+col_pal_mechanitis <- c("orange3","#8A5628", "gold2", "#2D1A12","beige", "#9E8757","#D6D5D6", "white")
+
+tab2 %>% filter(!is.na(Country)) %>%
+  ggplot() +
+  geom_point(aes(EV1, EV2,
+                 fill = Country), size = 3, shape=21, colour = "black") +
+  scale_fill_manual(values = c(col_pal_mechanitis, "purple", "")) +
+  scale_y_continuous(paste("PC2 (",round(pc.percent[2], 2), ")", sep = "")) +
+  scale_x_continuous(paste("PC1 (",round(pc.percent[1], 2), ")", sep = "")) +
+  theme_classic() +
+  theme(text = element_text(size = 20))
+
+
+  
+ggsave(filename=paste(OUTPUT_DIR,"/plots/pca.pdf", sep = ""),
+       height = 4,
+       width = 6
+       )
+
+tab2 %>% filter(!is.na(Country)) %>%
+  ggplot() +
+  geom_point(aes(EV1, EV2,
+                 fill = subspecies), size = 3, shape = 21, colour = "black") +
+  scale_fill_manual(values = c(col_pal_mechanitis, "purple", "blue")) +
+  scale_y_continuous(paste("PC2 (",round(pc.percent[2], 2), ")", sep = "")) +
+  scale_x_continuous(paste("PC1 (",round(pc.percent[1], 2), ")", sep = "")) +
+  theme_classic() +
+  theme(text = element_text(size = 20))
+
+ggsave(filename=paste(OUTPUT_DIR,"/plots/pca_subsp.pdf", sep = ""),
+       height = 4,
+       width = 6
+       )
+
+# close
+snpgdsClose(genofile)
+
+```
+
+Columbia and Ecuador in one cluster (proceriformis, dorissides, NA), Panama, close by (chimborazona, caucaensis,isthmia). 
+Peruvian, French Guiana and Surinam (proceriformis (second cluster), polymnia, and NA) in one cluster
+Brazil (casabranca) close to Peruvian cluster (South Peru, eurydice)
+

@@ -1,0 +1,59 @@
+# steps to analyse the output from syngraph and agora
+
+# Check the syngraph output with R
+
+cp ~/scripts/comp_gen_scripts_working/06_syngraph/syngraph_260501_mec_ms.Rmd
+mkdir plots tables
+
+# Run detect breakpoint to detect and classify events from AGORA output
+# get chr size files from genomes
+mkdir bed
+awk '{print $1"\t0\t"$2}' ../results/01_genomes/ilMecLysi212_hap1.fa.fai > bed/ilMecLysi212.bed
+awk '{print $1"\t0\t"$2}' ../results/01_genomes/ilMecPoly1_hap1.fa.fai > bed/ilMecPoly1.bed
+
+# check node names in the species tree from orthofinder
+python3 ../bin/plot_tree.py ../results/03_orthofinder/species_tree_node_labels.txt tree_agora.pdf
+
+#### run script run_breakpoint_analysis.sh to do the following three steps
+# Nodes N3 (pol_lys_anc) and N1 (mec_anc) are of interest
+
+bash ../bin/run_breakpoint_analysis.sh N1 ilMecPoly1 ilMecLysi212
+bash ../bin/run_breakpoint_analysis.sh N3 ilMecPoly1 ilMecLysi212
+
+## runs these steps
+#mkdir N1_lys_pol
+#python3 ../bin/detect_breakpoints_agora.py -i ../results/05_agora/output/agora_output/ancGenomes/basic-workflow/ancGenome.N1.list.bz2 --bed-dir bed/ --q1 ilMecPoly1 --q2 ilMecLysi212 -o N1_lys_pol/gene_alignment.tsv 2> N1_lys_pol/gene_alignment.log
+
+# Plot breakpoints 
+#python3 ../bin/plot_breakpoints_agora.py -i N1_lys_pol/gene_alignment.tsv -o N1_lys_pol/chr_painting_breakpoints.pdf
+
+# get conserved blocks from cactus alignments with nf-pipeline cactus_breakpoint_extraction to refine the breakpoints.
+# Refine breakpoints with cactus output
+    python3 ../bin/refine_breakpoints.py \
+        --input-bed-q1 gene_alignment.ilMecPoly1_breakpoints.bed \
+        --input-bed-q2 gene_alignment.ilMecLysi212_breakpoints.bed \
+        --blocks-q1 ../../breakpoint_extraction_260321/results/03_conserved_blocks/conserved_blocks_by_query1.tsv \
+        --blocks-q2 ../../breakpoint_extraction_260321/results/03_conserved_blocks/conserved_blocks_by_query2.tsv \
+        --bed-q1 N1_lys_pol/refined_ilMecPoly1.bed \
+        --bed-q2 N1_lys_pol/refined_ilMecLysi212.bed 2> N1_lys_pol/refined_breakpoints.log
+
+######
+
+# merge all anc output files to one file per species
+
+# need to add anc node and species name to the file
+for f in N*/refined_*_anc_breakpoints.bed; do
+  node=$(basename $(dirname "$f") | cut -d'_' -f1)
+  species=$(basename "$f" | sed 's/refined_//; s/_anc_breakpoints.bed//')
+  awk -v node="$node" -v sp="$species" 'BEGIN{OFS="\t"} {print $0, node, sp}' "$f"
+done | sort -k7 -Vk1 > combined_anc_breakpoints.bed
+
+head combined_anc_breakpoints.bed
+
+# Manually check the breakpoints against the synteny plot
+In R: stepwise check and correct breakpoints
+correct_breakpoints.R 
+
+# use the output file from the tree plot 
+to do the synteny plot
+

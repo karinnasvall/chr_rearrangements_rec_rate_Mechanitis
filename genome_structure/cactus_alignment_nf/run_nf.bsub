@@ -1,0 +1,68 @@
+#!/bin/bash
+#BSUB -J breakpoint_pipeline
+#BSUB -q oversubscribed
+#BSUB -n 1
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000] span[hosts=1]"
+#BSUB -o log/breakpoint_%J.out
+#BSUB -e log/breakpoint_%J.err
+
+
+# LSF job script to run the breakpoint detection pipeline
+# Submit with: bsub < run_nf.bsub
+
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/breakpoint_extraction_260321
+
+cd $WD
+
+# Activate conda environment with pandas
+
+conda activate my_py_env  # Replace with your actual environment name
+
+# load modules
+module load cactus/v3.1.2
+module load nextflow/25.10.0-10289
+
+
+HAL_FILE=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/breakpoints/cactus_260321/output/Mec_align.hal
+GENOME1="ilMecPoly1"
+GENOME2="ilMecLysi212"
+ANCESTOR="N7"
+OUTDIR=results
+min_block_size=50000
+min_alignment_length=100000
+
+
+#PROFILE="sanger"
+
+usage() {
+    echo "Usage: bsub < run_nf.bsub -- hal_file genome1 genome2 ancestor [outdir]"
+    echo "Or set environment variables HAL_FILE, GENOME1, GENOME2, ANCESTOR, OUTDIR before submitting"
+}
+
+
+
+echo "Starting LSF job"
+echo "HAL file: $HAL_FILE"
+echo "Genome1:  $GENOME1"
+echo "Genome2:  $GENOME2"
+echo "Ancestor: $ANCESTOR"
+echo "Outdir:   $OUTDIR"
+echo "Minimum block size: $min_block_size"
+echo "Minimum alignment length: $min_alignment_length"
+
+
+echo "Running pipeline script..."
+
+# Run Nextflow pipeline with correct parameter names (underscores, not hyphens)
+nextflow run main.nf \
+    --hal_file "$HAL_FILE" \
+    --genome1 "$GENOME1" \
+    --genome2 "$GENOME2" \
+    --ancestor "$ANCESTOR" \
+    --outdir "$OUTDIR" \
+    --min_block_size "$min_block_size" \
+    --min_alignment_length "$min_alignment_length"
+
+echo "Job finished"
+conda deactivate
