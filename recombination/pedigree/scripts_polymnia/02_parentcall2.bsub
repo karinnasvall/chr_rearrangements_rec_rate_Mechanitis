@@ -1,0 +1,37 @@
+#!/bin/bash
+#BSUB -J parentcall2_nextflow
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 4000
+#BSUB -R "select[mem>4000] rusage[mem=4000] span[hosts=1]"
+#BSUB -w "ended(concat_p2l)"
+#BSUB -o /data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia/logs/7.3_parentcall2/parentcall2_%J.out
+#BSUB -e /data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia/logs/7.3_parentcall2/parentcall2_%J.err
+
+set -euo pipefail
+
+BASE_DIR="/data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia"
+POSTGZ="${BASE_DIR}/7.1_pileup2lik_nextflow/all.post.gz"
+PEDIGREE_FILE="${BASE_DIR}/file_lists/pedigree.txt"
+
+OUT_DIR="${BASE_DIR}/8_lepwrap_nextflow"
+LOG_DIR="${BASE_DIR}/logs/7.3_parentcall2"
+mkdir -p "${OUT_DIR}/1_ParentCall" "${LOG_DIR}"
+
+module load conda
+conda activate /software/treeoflife/conda/users/envs/team347/kn9/lepwrap
+
+cd "${OUT_DIR}"
+
+# removeNonInformative=1: discard markers uninformative for linkage mapping
+# ZLimit=2: flag Z-linked markers (hemizygous in sex=2, i.e. females in Lepidoptera ZW system)
+zcat "${POSTGZ}" \
+| java -cp /software/treeoflife/conda/users/envs/team347/kn9/lepwrap/bin/lepmap3/ ParentCall2 \
+    data="${PEDIGREE_FILE}" \
+    posteriorFile=- \
+    removeNonInformative=1 \
+    ZLimit=2 \
+| gzip > "1_ParentCall/data.lepmap3.gz"
+
+echo "ParentCall2 complete: ${OUT_DIR}/1_ParentCall/data.lepmap3.gz"
+conda deactivate

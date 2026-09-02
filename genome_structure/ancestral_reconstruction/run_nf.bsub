@@ -32,4 +32,3 @@ nextflow run main.nf \
  #-resume
 
 echo "Job finished"
-conda deactivate
