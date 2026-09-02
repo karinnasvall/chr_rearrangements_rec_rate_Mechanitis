@@ -1,0 +1,53 @@
+#!/bin/bash
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000]"
+#BSUB -n 2
+#BSUB -q week
+#BSUB -J pop_gen
+#BSUB -o log/pop_gen.%J.%I.out
+#BSUB -e log/pop_gen.%J.%I.err
+
+
+REF=lysimnia
+
+POP_LIST=input/list_populations.txt
+#awk 'BEGIN{FS=",";OFS="\t"}{print $1,$8="Mechanitis_"$8}' output_vcf/vcf_qc/ref_pol_vcf_qc/tables/top_10_samples_for_selection.csv |tail +2 > ../popgen/input/list_populations.txt
+
+POP1=Mechanitis_polymnia
+POP2=Mechanitis_lysimnia
+GENO_DIR=geno
+OUTPUT_DIR=output_filter_10000
+GFF=input/ilMecLysi212.gff3
+REF_FASTA=../../../rawdata_to_vcf/03_variant_call_${REF}_rptmask/ref/ilMecLysi212_1.renamed.masked.fa.gz
+VCF_CONCAT=${REF}_filtered_concat.vcf.gz
+SCRIPT_PATH=/software/team347/kn9/genomics_general/
+
+mkdir -p ${GENO_DIR}
+mkdir -p ${OUTPUT_DIR}
+
+module load samtools/1.20--h50ea8bc_0 bcftools/1.20--h8b25389_0
+
+ls ../variant_calling/filtered_allsites/*.vcf.gz | sort -V > input/list_filt_vcf_sorted.txt
+
+bcftools concat -f input/list_filt_vcf_sorted.txt -O z -o $VCF_CONCAT
+
+tabix -p vcf $VCF_CONCAT
+
+echo "Parsing ${VCF_CONCAT} to geno format for population genomics analyses"
+python3 ${SCRIPT_PATH}/VCF_processing/parseVCF.py -i $VCF_CONCAT --skipIndels -o ${GENO_DIR}/${VCF_CONCAT%.*}.geno.gz
+
+# check that the geno file is produced and not empty
+if [ -s ${GENO_DIR}/${VCF_CONCAT%.*}.geno.gz ]; then
+    echo "Geno file created successfully: ${GENO_DIR}/${VCF_CONCAT%.*}.geno.gz"
+else
+    echo "Error: Geno file is missing or empty: ${GENO_DIR}/${VCF_CONCAT%.*}.geno.gz"
+    exit 1
+fi
+
+
+echo "Processsing ${VCF_CONCAT} for population genomics analyses"
+python3 ${SCRIPT_PATH}/popgenWindows.py --windType coordinate -w 100000 -m 10000 --overlap 0 --writeFailedWindows -f phased -p $POP1 -p $POP2 --popsFile ${POP_LIST} -g ${GENO_DIR}/${VCF_CONCAT%.*}.geno.gz -o ${OUTPUT_DIR}/${VCF_CONCAT%.*}.out.csv.gz -T 4 --verbose
+
+
+# echo "Calculating coding site types for ${VCF_CONCAT}"
+# python3 ${SCRIPT_PATH}/codingSiteTypes.py -a $GFF -f gff3 -r $REF_FASTA -v $VCF_CONCAT --ignoreConflicts | bgzip > ${OUTPUT_DIR}/${VCF_CONCAT%.*}.coding_site_types.tsv.gz

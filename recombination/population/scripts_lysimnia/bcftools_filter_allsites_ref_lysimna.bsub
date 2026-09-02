@@ -1,0 +1,49 @@
+#!/bin/bash
+#BSUB -M 500
+#BSUB -R "select[mem>500] rusage[mem=500]"
+#BSUB -n 2
+#BSUB -q normal
+#BSUB -J bcftools_filter[1-16]
+#BSUB -o log/bcftools_filter.%J.%I.out
+#BSUB -e log/bcftools_filter.%J.%I.err
+
+VCF_PATH=$(sed -n -e ${LSB_JOBINDEX}p output_vcf/vcf_qc/list_vcf.txt)
+
+VCF=$(basename ${VCF_PATH})
+
+REF=lysimnia
+WD=/data/tol/teams/meier/lustre/users/kn9/recombination/pop_gen/ref_${REF}/variant_calling
+VCF_DIR=${WD}/output_vcf/vcfs
+OUTDIR_ALL=${WD}/filtered_allsites
+POP_LIST=${WD}/output_vcf/vcf_qc/ref_lys_vcf_qc/list_samples_ref_pol.txt
+SITE_MAX_DEPTH=5650
+# initial median site dp 2825 * 2 = 5650
+# bcftools do not recount after removing individuals
+
+#cut -f1 -d"," ${WD}/output_vcf/vcf_qc/ref_pol_vcf_qc/tables/top_10_samples_for_selection.csv |tail +2 > list_samples.txt
+
+mkdir -p $OUTDIR_ALL
+mkdir -p $OUTDIR_ALL/vcf_thinned
+
+echo "Processing ${VCF_DIR}/${VCF}"
+
+#load modules
+module load bcftools/1.20--h8b25389_0  
+
+
+# bcftools filter gives genotypes with low depth and low quality marked ./. (missing)
+# include max 2 alleles and exclude indels: 'view -V indels -M2' - only biallelic
+# site filtering after marking low qual/dp genomtypes as missing
+# get filtered all sites file (can't filter on MAF or GQ here)
+
+bcftools view -S ${POP_LIST} ${VCF_DIR}/${VCF} \
+| bcftools filter -i 'FMT/DP>=6' --SnpGap 5 -S . \
+| bcftools view -V indels -M2 \
+| bcftools view -i "INFO/DP<${SITE_MAX_DEPTH} && F_MISSING<0.1 && INFO/MQ >= 20" \
+-Oz -o ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz
+
+echo "Calculating stats for ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz"
+bcftools stats -s - ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz > ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.stats
+
+# thin file for qc
+bcftools view -v snps ${OUTDIR_ALL}/${VCF%.*}_filtered.allsites.vcf.gz | bcftools +prune -w 10000bp -n 1 -N rand --output ${OUTDIR_ALL}/vcf_thinned/${VCF%.*}_thin_snps.vcf.gz -Oz
