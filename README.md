@@ -27,19 +27,19 @@ Archive: [Zenodo DOI: **will be added at release**] · Raw reads for population 
 
 ## Scripts directory structure
 
-Folders are numbered in analysis order. Each folder has its own `README.md` (inputs, outputs, run order, parameters) where marked ✔.
+Folders are numbered in analysis order.
 
 | Folder | Contents | README |
 |---|---|---|
-| `scripts/01_genome_annotation/` | Gene and repeat annotation and window-based feature densities | ✔ |
-| `scripts/02_rearrangements/` | Breakpoint detection and ancestral reconstruction | ✔ |
-| `scripts/03_chromatin/` | Hi-C processing and A/B compartments | [add] |
-| `scripts/04_data_processing/` | Trimming, mapping, variant calling and filtering of population data | ✔ |
-| `scripts/05_pedigree_recombination/` | Lep-MAP3 linkage maps and crossover-based rates from the F2 pedigrees | ✔ |
-| `scripts/06_population_recombination/` | Population recombination maps (SMC++, pyrho) | [add] |
-| `scripts/07_recombination_models/` | Statistical models of recombination rate | [add] |
-| `scripts/08_pop_gen/` | Population structure (ADMIXTURE) and diversity/divergence statistics | [add] |
-| `scripts/09_combined_analysis/` | Data integration and main figures | [add] |
+| `scripts/01_genome_annotation/` | Gene and repeat annotation and window-based feature densities |
+| `scripts/02_rearrangements/` | Breakpoint detection and ancestral reconstruction |
+| `scripts/03_chromatin/` | Hi-C processing and A/B compartments |
+| `scripts/04_data_processing/` | Trimming, mapping and variant calling of population and pedigree data |
+| `scripts/05_pedigree_recombination/` | Lep-MAP3 linkage maps and crossover-based rates from the F2 pedigrees |
+| `scripts/06_population_recombination/` | Population recombination maps (pyrho) |
+| `scripts/07_recombination_models/` | Recombination rate as a function of genome structure and genomic features |
+| `scripts/08_pop_gen/` | Population structure (ADMIXTURE) and diversity/divergence statistics |
+| `scripts/09_combined_analysis/` | Main analyses and figures |
 
 ```text
 scripts
@@ -97,15 +97,15 @@ scripts
 
 | Manuscript section (Methods) | Folder | Main tools | Key outputs |
 |---|---|---|---|
-| Genome annotation, repeats, 100 kb window features | `01_genome_annotation/` | Helixer, pantera, pggb, RepeatMasker, BEDTools | Window table (`data/processed/`), repeat occupancy per chromosome |
-| Characterisation of chromosomal rearrangements | `02_rearrangements/` | Progressive Cactus, minimap2, ODP/syngraph, AGORA, OrthoFinder | Breakpoint table (type, polarity, coordinates), Figure 1 |
+| Gene annotation, repeats, 100 kb window features | `01_genome_annotation/` | Helixer, pantera, RepeatMasker | gene and repeat occupancy per window |
+| Characterisation of chromosomal rearrangements | `02_rearrangements/` | syngraph, AGORA, minimap2, ODP | Breakpoint table (type, polarity, coordinates), Figure 1 |
 | Chromatin compartments | `03_chromatin/` | nf-core/hic, HiC-Pro, Cooler, cooltools | A/B compartment calls (100 kb) |
-| Read processing, alignment and variant calling | `04_data_processing/` | fastp, bwa-mem2, samtools, mosdepth, bcftools, vcfR | Filtered bam-files, VCFs, QC and coverage summaries |
-| Pedigree recombination | `05_pedigree_recombination/` | samtools, Lep-MAP3, cobs | Linkage maps, crossover counts |
-| Population recombination | `06_population_recombination/` | bcftools, SMC++, pyrho | Population recombination maps |
-| Recombination across the genome | `07_recombination_models/` | R: lme4, mgcv | Model objects, diagnostics |
-| Differentiation and gene flow | `08_pop_gen/` | ADMIXTURE, genomics_general, PLINK 2 | π, *D*<sub>XY</sub>, *F*<sub>ST</sub> per 100 kb |
-| Figures and supplementary tables | `09_combined_analysis/` | R (Rmd) | Figures 2–3 and supplementary material |
+| Read processing, alignment and variant calling | `04_data_processing/` | fastp, bwa-mem2, samtools, bcftools | Filtered bam-files, VCFs, QC and coverage summaries |
+| Pedigree recombination | `05_pedigree_recombination/` | Lep-MAP3 | Linkage maps, crossover counts |
+| Population recombination | `06_population_recombination/` | pyrho | Population recombination maps |
+| Recombination across the genome | `07_recombination_models/` | R: lme4  | Model objects, diagnostics |
+| Differentiation and gene flow | `08_pop_gen/` | ADMIXTURE, genomics_general | π, *D*<sub>XY</sub>, *F*<sub>ST</sub> per 100 kb |
+| Figures and supplementary tables | `09_combined_analysis/` | R | Figures 2–3 and supplementary material |
 
 
 
