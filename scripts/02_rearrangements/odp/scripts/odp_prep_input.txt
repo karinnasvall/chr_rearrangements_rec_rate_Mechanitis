@@ -1,0 +1,115 @@
+#copy single copy files (without W) from busco and change name to .fasta
+#Sample names can't have '_' char: ilForEqui1_hap1
+
+LIST_TOLID=list_tolid.txt
+mkdir input
+mkdir input/peptide
+mkdir input/genome
+mkdir input/chrom_input
+
+cp ../busco/single_copy_faa/* input/peptide/
+
+rename 's/_noW\.fa\.faa/\.fasta/' input/peptide/*
+rename 's/_W\.fa\.faa/\.fasta/' input/peptide/*
+rename 's/_hap/.hap/' input/peptide/*
+
+ls input/peptide/*.fasta > list_input_peptide.txt
+# the chrom file needs: sequence (gene) name, chromosome, strand, start, end
+for file in $(cat list_input_peptide.txt); do grep ">" ${file} |cut -f2,3 -d"|" | sed -E 's/:|\|/\t/g' |paste - <(grep ">" ${file} | cut -f1,2 -d"|") |tr -d ">" | sed 's/-/\t/1' | awk 'BEGIN{FS=OFS="\t"} {print $5, $1, substr($4,1,1), $2, $3}' |sed -E 's/:|\|/_/g;s/-/_/1' > input/chrom_input/$(basename ${file%.*}).chrom;done
+
+#change fasta header 
+for file in $(cat list_input_peptide.txt);do sed 's/|[^|]*$//' ${file} | sed -E 's/\||:|-/_/g' > ${file}_mod;mv ${file}_mod ${file};done
+
+#copy and rename assembly fasta
+for file in $(ls ../fasta_W_in_hap2/*fa.gz);do
+filename=$(basename $file)
+zcat $file > input/genome/${filename%.*}
+done
+
+rename 's/_noW\.fa/_assembly\.fasta/' input/genome/*
+rename 's/_W\.fa/_assembly\.fasta/' input/genome/*
+rename 's/_hap/.hap/' input/genome/*.fasta
+
+
+#make pairwise config files
+bash ../scripts/odp_config_multiple.sh list_all_genomes_ordered.txt
+
+#run odp
+bsub < ../scripts/odp_array.bsub 
+
+#
+
+#then flip chromosomes after busco strand
+#with flip_chr.bsub
+
+#make pairwise config files
+bash ../scripts/odp_config_multiple_flipped.sh list_all_genomes_ordered.txt
+
+
+#run odp for all input taxa
+odp_array.bsub
+
+#ERROR: Sample names can't have '_' char: ilForEqui1_hap1
+
+rename 's/_hap/.hap/' input/peptide/*.fasta
+rename 's/_hap/.hap/' input/genome/*.fasta
+rename 's/_hap/.hap/' input/chrom_input/*.chrom
+sed -i 's/_hap/\.hap/g' list_all_genomes_ordered.txt 
+
+#create config files
+config_multi.sh
+
+#run odp for all input taxa
+odp_array.bsub
+
+# move rbh file to one directory
+cp pairwise_comp/*/odp/step1-rbh-filtered/*rbh pairwise_comp/step1-rbh-filtered_all/
+
+#create config file for ribbon plot
+grep -A5 "^species" config_files/*odp.yaml
+sed -i 's/\.\.\/\.\.\//\.\.\//' config_files/CONFIG_rbh_to_ribbon.yaml 
+
+# plot ribbon plot
+odp_ribbon_plot.bsub
+
+#Check plot
+
+
+#Make a list of chromosomes to flip, species and chr name sep = ","
+
+Flip chr with flip specific chr script 
+#make pairwise config files
+bash ../scripts/odp_config_multiple_flipped.sh list_all_genomes_ordered.txt
+
+#change in and output files, rerun odp in new output directory _flipped.
+bsub < ../scripts/odp_array.bsub 
+
+#create config file for ribbon plot
+grep -A5 "^species" config_files_flipped/*odp.yaml | grep -v -E "species" |sed 's/\-\-//' |cut -f2 -d"-" | sed 's/\.\.\/\.\.\//\.\.\//'
+
+# add this to the config_files_flipped/CONFIG_rbh_to_ribbon.yaml 
+
+
+# Rerun odp_ribbon_plot
+# this also change ancestral colours
+
+bsub < ../scripts/odp_ribbon_plot.bsub
+
+
+rename 's/\.hap1//' input/genome/*.fasta*
+
+rename 's/\.hap1//' input/peptide/*.fasta*
+rename 's/\.hap1//' input/chrom_flipped/*.chrom
+
+#make pairwise config files
+bash ../scripts/odp_config_multiple.sh list_all_genomes_ordered.txt
+
+# change names chromosomes (remove SUPER_) so only number 
+sed -i 's/SUPER_//g' input/genome/*
+sed -i 's/SUPER_//g' input/peptide/*
+sed -i 's/SUPER_//g' input/chrom_flipped/*
+
+#run odp
+bsub < ../scripts/odp_array.bsub 
+
+bsub < ../scripts/odp_ribbon_plot.bsub

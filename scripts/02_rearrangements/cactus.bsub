@@ -1,0 +1,23 @@
+#!/bin/bash
+
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -n 8
+#BSUB -q long
+#BSUB -J cactus
+#BSUB -o log/cactus.%J.%I.out
+#BSUB -e log/cactus.%J.%I.err
+
+# -M 40000 was required for multiple alignment
+
+WD=recombination/breakpoints/cactus
+JS_DIR=${WD}/jobStore
+SEQ_FILE=${WD}/input/seqFile.txt
+#CHROM_FILE=${WD}/input/chrom_info.tsv
+OUTPUT_HAL=${WD}/output/Mec_align.hal
+
+mkdir -p ${WD}/output/
+
+ml cactus/v3.1.2  
+
+cactus $JS_DIR $SEQ_FILE $OUTPUT_HAL

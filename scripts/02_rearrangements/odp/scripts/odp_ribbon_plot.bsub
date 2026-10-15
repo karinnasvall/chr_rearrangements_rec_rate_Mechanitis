@@ -1,0 +1,44 @@
+#!/bin/bash
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -n 12
+#BSUB -q normal
+#BSUB -J odp_ribbon
+#BSUB -o log/odp_ribbon_%J.%I.out
+#BSUB -e log/odp_ribbon_%J.%I.err
+
+
+# exits on error
+set -euo pipefail
+
+#variables
+PATH_SCRIPT=/software/team347/kn9/
+CONFIG_FILE=config_files_flipped/CONFIG_rbh_to_ribbon.yaml
+OUTPUT_DIR=pairwise_comp_flipped
+RBH_LIST=${OUTPUT_DIR}/rbh_list.txt
+
+ls ${OUTPUT_DIR}/*/odp/step1-rbh-filtered/*rbh > $RBH_LIST
+
+conda activate my_py_env
+module load diamond/2.1.9--h43eeafb_0
+module load blast/2.15.0--pl5321h6f7f691_1
+
+mkdir -p ${OUTPUT_DIR}/step1-rbh-filtered_anc_col_rainbow
+
+for RBH_FILE in $(cat $RBH_LIST); do
+echo "Processing ${RBH_FILE}"
+base=$(basename ${RBH_FILE})
+
+python ../scripts/add_anc_colour.py \
+  -e outgroup_elements_db12.tsv \
+  -r $RBH_FILE \
+  -o ${OUTPUT_DIR}/step1-rbh-filtered_anc_col_rainbow/${base%.*}.coloured.rbh \
+  --color_map list_anc_colour_rainbow.txt
+
+
+done
+
+echo "Running ODP ribbon plot script"
+snakemake --snakefile ${PATH_SCRIPT}/odp/scripts/odp_rbh_to_ribbon --configfile $CONFIG_FILE --max-threads 12 --cores 12 --directory $OUTPUT_DIR
+
+

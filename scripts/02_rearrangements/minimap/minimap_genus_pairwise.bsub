@@ -1,0 +1,41 @@
+#!/bin/bash
+#BSUB -M 25000
+#BSUB -R "select[mem>25000] rusage[mem=25000] span[hosts=1]"
+#BSUB -n 8
+#BSUB -q normal
+#BSUB -J align_minimap[1-2]
+#BSUB -o log/minimap.%J.%I.out
+#BSUB -e log/minimap.%J.%I.err
+
+
+path_genome1=$(sed -n -e "${LSB_JOBINDEX}p" list_genomes.txt)
+path_genome2=$(sed -n -e $((LSB_JOBINDEX + 1))p list_genomes.txt)
+
+genome1=$(basename ${path_genome1} | cut -d'.' -f1 |cut -d"_" -f1)
+genome2=$(basename ${path_genome2} | cut -d'.' -f1 |cut -d"_" -f1)
+
+# filter to remove alignments shorter than NUMBER
+align_filter=100000
+
+mkdir -p minimap_output/
+cd minimap_output/
+mkdir -p log
+
+output_paf=${genome1}_${genome2}.paf
+
+module load minimap2/2.27--he4a0461_1 
+
+minimap2 \
+    -t 8 \
+    -x asm10 \
+    -o $output_paf \
+    $path_genome1 \
+    $path_genome2 \
+    2> log/${genome1}_${genome2}.err
+
+
+# Plotting the synteny
+mkdir -p intermediate plots
+conda activate syntenyplotteR
+Rscript ~/scripts/comp_gen_scripts_working/04_genome_alignment/syntenyplotteR_paf_mod.R $output_paf $align_filter
+conda deactivate

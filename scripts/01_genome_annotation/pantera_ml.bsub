@@ -1,0 +1,81 @@
+#!/bin/bash
+#BSUB -M 20000
+#BSUB -R "select[mem>20000] rusage[mem=20000] span[hosts=1]"
+#BSUB -n 16
+#BSUB -q normal
+#BSUB -J pantera[2-86]
+#BSUB -o log/pantera.%J.%I.out
+#BSUB -e log/pantera.%J.%I.err
+
+genome=$(sed -n -e ${LSB_JOBINDEX}p gfas_all.list)
+
+#genome windows for plot and table
+WINDOW=100000
+
+tolid=$(basename ${genome})
+
+echo "$genome" > ${tolid%%.*}.list
+
+output_path=output/${tolid%%.*}
+echo $output_path
+
+echo "Processing pantera on $genome"
+
+module load pantera/0.2.2-c1 repeatmodeler/2.0.5--pl5321hdfd78af_0 bedtools/2.30.0--pl5321hdfd78af_0
+
+#Rscript /software/team347/kn9/pantera/pantera-main/pantera.R -g ${tolid}.list -c 16 -o $output_path
+pantera.R -g ${tolid%%.*}.list -c 16 -o $output_path
+wait
+cd $output_path
+RepeatClassifier -consensi pantera_lib.fa
+wait
+pantercheck.R pantera_lib.fa.classified
+
+cd ../../RepeatMasker/
+echo "Running repeatmasker $TOLID"
+
+INPUT_LIB=../output/${tolid%%.*}
+OUTPUT=${tolid%%.*}
+INPUT_FASTA=../../../01_data/renamed_fasta/${tolid%%.*}_1.fa.gz
+
+mkdir $OUTPUT
+zcat $INPUT_FASTA > $OUTPUT/${tolid%%.*}_1.fasta
+
+# Run RepeatMasker on the primary assembly (incl W) with the new library
+#/software/team347/kn9/RepeatMasker/RepeatMasker -pa 4 -e rmblast -rmblast_dir /software/team347/kn9/rmblast-2.14.1/bin/  -lib $INPUT_LIB/pantera_lib.fa.classified -gff -dir $OUTPUT $OUTPUT/${tolid%%.*}_1.fasta
+
+# new path to repeatmasker, not tried!
+conda activate /software/treeoflife/conda/users/envs/tol/earlgrey_6.1.1
+#or
+module load repeatmodeler/2.0.5--pl5321hdfd78af_0
+RepeatMasker -pa 4 -e rmblast -rmblast_dir /software/team347/kn9/rmblast-2.14.1/bin/  -lib $INPUT_LIB/pantera_lib.fa.classified -gff -dir $OUTPUT $OUTPUT/${tolid%%.*}_1.fasta
+conda deactivate
+
+#create table and summary plots
+conda activate my_py_env
+
+echo "Processing result of ${tolid%%.*}"
+
+input_file=$OUTPUT/${tolid%%.*}_1.fasta.out
+
+#convert output to bed
+echo "Converting out to bed ${tolid%%.*}"
+python ~/scripts/comp_gen_scripts_working/09_repeats/repeatmasker_to_bed.py --prefix ${tolid%%.*} --input_file $input_file --output_dir $OUTPUT
+
+#sort and merge overlapping repeats in bed file, end - 1 before merge, otherwise bookended repeats will be merged
+bedtools sort -i $OUTPUT/${tolid%%.*}_repeats.bed |awk 'BEGIN{FS=OFS="\t"}{print $1, $2, $3-1, $4}'| bedtools merge -c 4 -o distinct| awk 'BEGIN{FS=OFS="\t"}{print $1, $2, $3+1, $4}' > $OUTPUT/${tolid%%.*}_repeats_merged.bed
+# make windows in bed file
+bedtools makewindows -g ${INPUT_FASTA%.*}.fai -w $WINDOW > $OUTPUT/${tolid%%.*}_${WINDOW}_wd.bed
+
+#estimate occupancy in windows and plot
+echo "Estimating repeat occupancey of ${tolid%%.*}"
+python ~/scripts/comp_gen_scripts_working/09_repeats/repeat_occupancy_calculator_plot.py --genome-fai ${INPUT_FASTA%.*}.fai --prefix $OUTPUT/${tolid%%.*} --window $WINDOW
+
+#summarise per chromosome and repeat class
+echo "Summarising repeat content per chromosome for ${tolid%%.*}"
+bash ~/scripts/utils/summarise_repeat_per_chr.sh $OUTPUT/${tolid%%.*}_repeats_merged.bed $OUTPUT/${tolid%%.*}_repeats_summary.tsv
+
+echo "Processing finished for ${tolid%%.*}"
+
+conda deactivate
+

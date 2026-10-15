@@ -1,0 +1,37 @@
+#!/bin/bash
+#BSUB -M 500
+#BSUB -R "select[mem>500] rusage[mem=500] span[hosts=1]"
+#BSUB -n 2
+#BSUB -q normal
+#BSUB -J exon_density[1-9]
+#BSUB -o log/exon_density.%J.%I.out
+#BSUB -e log/exon_density.%J.%I.err
+
+
+WD_PATH="/data/tol/teams/meier/lustre/projects/ithomiini/comp_gen"
+LIST_FILE="$WD_PATH/03_gene_annotation/helixer/list_Mec_genomes.txt"
+OUT_DIR="$WD_PATH/03_gene_annotation/helixer/Mec_CDS_density_100kb"
+FEATURE="CDS" 
+WINDOW=100000
+
+
+# Get genome path from list
+genome=$(sed -n -e "${LSB_JOBINDEX}p" "$LIST_FILE")
+
+# Check if genome file exists
+if [ ! -f "$WD_PATH/$genome" ]; then
+    echo "ERROR: Genome file $WD_PATH/$genome not found."
+    exit 1
+fi
+
+tolid=$(basename "$genome" .fa.gz)
+GFF_FILE="$WD_PATH/03_gene_annotation/helixer/output/${tolid}.gff3" 
+
+module load bedtools/2.31.1--hf5e1c6e_1 samtools/1.20--h50ea8bc_0
+
+bash ~/scripts/utils/get_windowbased_content.sh \
+    -g "$WD_PATH/$genome" \
+    -a "$GFF_FILE" \
+    -f "$FEATURE" \
+    -w "$WINDOW" \
+    -o "$OUT_DIR"

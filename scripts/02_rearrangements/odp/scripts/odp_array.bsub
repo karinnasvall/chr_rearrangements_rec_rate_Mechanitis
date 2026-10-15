@@ -1,0 +1,39 @@
+#!/bin/bash
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000] span[hosts=1]"
+#BSUB -n 12
+#BSUB -q normal
+#BSUB -J odp[1-8]
+#BSUB -o log/odp_%J.%I.out
+#BSUB -e log/odp_%J.%I.err
+
+
+# exits on error
+set -euo pipefail
+
+#variables
+PATH_SCRIPT=/software/team347/kn9/
+LIST_FILE=list_configs_flipped.txt
+INPUT_DIR=input/chrom_flipped
+OUTPUT=pairwise_comp_flipped
+
+mkdir -p ${OUTPUT}
+
+CONFIG_FILE=$(sed -n -e "${LSB_JOBINDEX}p" "${LIST_FILE}")
+
+base=$(basename ${CONFIG_FILE})
+
+#make a directory for each comparison
+OUTPUT_DIR=${OUTPUT}/${base%_*}_odp
+mkdir -p ${OUTPUT_DIR}
+
+conda activate my_py_env
+
+
+module load diamond/2.1.9--h43eeafb_0
+module load blast/2.15.0--pl5321h6f7f691_1
+
+echo "Running snakemake for ${CONFIG_FILE}"
+snakemake --snakefile ${PATH_SCRIPT}/odp/scripts/odp --configfile $CONFIG_FILE --max-threads 12 --cores 12 --directory $OUTPUT_DIR
+
+

@@ -1,0 +1,69 @@
+#!/bin/bash
+#BSUB -M 2000
+#BSUB -R "select[mem>2000] rusage[mem=2000] span[hosts=1]"
+#BSUB -n 2
+#BSUB -q normal
+#BSUB -J flip_chr
+#BSUB -o log/flip_chr.%J.%I.out
+#BSUB -e log/flip_chr.%J.%I.err
+
+# take input from busco and plots rearrangements
+
+conda activate my_py_env
+
+# input can be either a directory with busco tables, then a formatted table will be created,
+# or a table with busco results already formatted
+CHROM_DIR=input/chrom_input
+#BUSCO_DIR=output_250811/tables/all_busco_merian_2025-08-11.tsv
+INPUT_DIR=input/chrom
+#ANC_TABLE=anc_elements/outgroup_elements_db12.tsv
+
+
+LIST_TOLID=list_tolid.txt
+#for faidx later
+module load samtools/1.20--h50ea8bc_0
+
+# get conserved elements from outgroup
+# python ~/scripts/comp_gen_scripts_working/06_synteny_rearr_plots/get_conserved_elements.py \
+#   --input_folder anc_elements/full_tables/ \
+#   --output anc_elements/outgroup_elements_db12.tsv
+
+mkdir -p input/chrom
+
+# flip chromosome orientation
+for tolid in $(cat $LIST_TOLID); do
+  echo "Processing file: $tolid"
+
+  # check if the chromosome file exists
+  if [ ! -f $CHROM_DIR/${tolid}.chrom ]; then
+    echo "Error: Chromosome file $CHROM_DIR/${tolid}.chrom not found."
+    exit 1
+  fi
+  
+  # only keep numbers in chr for plotting reasons
+  # echo "Modifying chromosome names for $tolid"
+  # sed -i "s/${tolid}_1_//g" $CHROM_DIR/${tolid}.chrom
+  # sed -i "s/${tolid}_1_//g" input/peptide/${tolid}.fasta
+  # sed -i "s/${tolid}_1_//g" input/genome/${tolid}_assembly.fasta
+
+
+  # get a new chromosome length file
+  echo "Creating chromosome length file for $tolid"
+  samtools faidx input/genome/${tolid}_assembly.fasta
+
+  python ~/scripts/comp_gen_scripts_working/06_synteny_rearr_plots/flip_chromosomes.py \
+    -i $CHROM_DIR/${tolid}.chrom \
+    -o $INPUT_DIR/${tolid}.chrom \
+    -f input/genome/${tolid}_assembly.fasta.fai \
+    --format chrom
+
+
+  # check if the file exists after processing
+  if [ ! -f $INPUT_DIR/${tolid}.chrom ]; then
+    echo "Error: Output file $INPUT_DIR/${tolid}.chrom not found."
+    exit 1
+  fi
+
+  echo "Successfully processed $tolid"
+done
+

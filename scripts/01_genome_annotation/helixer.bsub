@@ -1,0 +1,74 @@
+#!/bin/bash
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -n 12
+#BSUB -gpu -
+#BSUB -q gpu-normal
+#BSUB -J helixer[5-90]
+#BSUB -o log/helixer.%J.%I.out
+#BSUB -e log/helixer.%J.%I.err
+
+# exits on error
+set -euo pipefail
+
+#set variables
+WD_PATH="/data/tol/teams/meier/lustre/projects/ithomiini/comp_gen"
+LIST_FILE="$WD_PATH/list_path_hap1.txt"
+OUT_DIR="$WD_PATH/03_gene_annotation/helixer/output"
+MODEL_PATH="/software/team347/kn9/Helixer/models/invertebrate/"
+
+# Check input list file
+if [ ! -f "$LIST_FILE" ]; then
+    echo "ERROR: List file $LIST_FILE not found."
+    exit 1
+fi
+
+# Get genome path from list
+genome=$(sed -n -e "${LSB_JOBINDEX}p" "$LIST_FILE")
+
+# Check if genome file exists
+if [ ! -f "$WD_PATH/$genome" ]; then
+    echo "ERROR: Genome file $WD_PATH/$genome not found."
+    exit 1
+fi
+
+fasta=$(basename "$genome")
+tolid="${fasta%%.*}"
+
+module load helixer-docker/helixer_v0.3.5_cuda_12.2.2-cudnn8 gffread/0.12.7--hdcf5f25_4 busco/6.0.0--pyhdfd78af_0
+
+# run all Helixer components from fa to gff3
+Helixer.py \
+    --lineage invertebrate \
+    --fasta-path "$WD_PATH/$genome"  \
+    --species $tolid \
+    --gff-output-path $OUT_DIR/${tolid}.gff3
+    
+
+#unzip and copy genome to output directory (gffreads do not handle gz)
+zcat "$WD_PATH/$genome" > "$OUT_DIR/${fasta%.*}"
+
+echo "Running gffread on $tolid to get cds.faa and cds.fna files"
+#get the cds nucleotides
+gffread \
+  -g "$OUT_DIR/${fasta%.*}" \
+  -x "$OUT_DIR/$tolid.cds.fna" \
+  "$OUT_DIR/$tolid.gff3"
+
+#get the cds amino acids
+gffread \
+  -g "$OUT_DIR/${fasta%.*}" \
+  -y "$OUT_DIR/$tolid.cds.faa" \
+  "$OUT_DIR/$tolid.gff3"
+
+echo "Running BUSCO on protein files for $tolid"
+#run busco ont the protein files
+busco -i "$OUT_DIR/$tolid.cds.faa" \
+    -l lepidoptera_odb12 \
+    -m protein \
+    -o output/${tolid}_busco \
+    -c 12 \
+    --tar
+
+rm "$OUT_DIR/${fasta%.*}"
+
