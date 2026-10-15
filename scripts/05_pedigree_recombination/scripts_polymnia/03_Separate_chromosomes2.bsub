@@ -1,0 +1,66 @@
+#!/bin/bash -l
+
+#BSUB -q normal
+#BSUB -n 20
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000] span[hosts=1]"
+#BSUB -J lm3_sep_chrom[1-10]
+#BSUB -e log/lm3_sep_chrom.%J.%I.error
+#BSUB -o log/lm3_sep_chrom.%J.%I.out
+
+
+#script to evaluate lod score in LepMap3
+
+#LOD is set by jobindex to run the maps as array jobs.
+
+LOD=$LSB_JOBINDEX
+
+PROG_DIR=/software/team347/kn9/lep-map3-code/bin
+
+
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/pedigree/lepmap/
+
+PREFIX=polymnia
+OUTPUT_PATH=$WD/03_separate_chromosomes2_samplepairs_mask1
+INPUT_DATA=$WD/input/data.filtered.lepmap3.gz
+
+
+#run SepChromosomes with different lodLimits to assign optimal LG
+#use either output from ParentCall or Filtering2
+
+mkdir $OUTPUT_PATH/
+echo "Running SeparateChromosomes2"
+date
+
+# for i in {6..12}
+# do
+echo lodLimit${LOD}
+zcat $INPUT_DATA |java -cp $PROG_DIR/ SeparateChromosomes2 \
+ data=-\
+ lodLimit=${LOD}\
+ distortionLod=1\
+ numThreads=20 \
+ samplePairs=0.1 \
+ informativeMask=1 \
+ > $OUTPUT_PATH/${PREFIX}.${LOD}.map  2> $OUTPUT_PATH/${PREFIX}.${LOD}.log
+# wait
+# done
+
+echo ”Finished SeparateChromosomes2 $LOD ”
+date
+
+
+# #gleaning the data
+# (echo "LG";seq 0 60) > $OUTPUT_PATH/${PREFIX}_sepchr_lod.txt
+
+# for lg in {1..30}
+# do
+# echo $lg
+# sort $OUTPUT_PATH/${PREFIX}.${lg}.map | uniq -c | sort -k2 -g |  awk 'NR==1{print $5};NR>1{print $1}' | paste $OUTPUT_PATH/${PREFIX}_sepchr_lod.txt - > $OUTPUT_PATH/${PREFIX}_sepchr_lod_prel.txt && mv $OUTPUT_PATH/${PREFIX}_sepchr_lod_prel.txt $OUTPUT_PATH/${PREFIX}_sepchr_lod.txt
+# wait
+# done
+
+# echo ”Finished”
+# date
+
+# #check resultfile in r

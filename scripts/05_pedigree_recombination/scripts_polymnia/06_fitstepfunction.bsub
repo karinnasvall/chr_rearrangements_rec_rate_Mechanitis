@@ -1,0 +1,55 @@
+#! /bin/bash -l
+
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 500
+#BSUB -R "select[mem>500] rusage[mem=500] span[hosts=1]"
+#BSUB -J lm3_fitstep
+#BSUB -e log/lm3_fitstep.%J.%I.error
+#BSUB -o log/lm3_fitstep.%J.%I.out
+
+
+
+PROG_DIR=/software/team347/kn9/lep-anchor-code/bin
+
+WD=/lustre/scratch125/tol/teams/meier/users/kn9/recombination/pedigree/lepmap/
+
+INPUT_SNP=$WD/input/snps.txt
+ORDERED_MAP_DIR=$WD/05_order_mask13_nomapf
+PREFIX=mask13_nomapf
+OUTPUT=$WD/06_fitted_${PREFIX}
+
+N_LGS=16
+
+mkdir -p $OUTPUT
+
+# Get best likelihood rep from 05_order_eval_likelihood.sh
+bash scripts/05_order_eval_likelihood.sh $ORDERED_MAP_DIR
+
+
+# very fast, no parallelization needed, run on normal queue
+
+for map in $(cat $ORDERED_MAP_DIR/best_likelihood_files.txt); do
+  LG=$(basename $map | sed 's/ordered\.\([0-9]*\).*/\1/')
+  echo "Fitting step function to LG${LG} at $(date)"
+  java -cp $PROG_DIR FitStepFunction \
+      map=$map \
+      markerSupport=$OUTPUT/marker_support_$LG.txt \
+      snps=$INPUT_SNP > $OUTPUT/ordered.$LG.fitted 2> $OUTPUT/ordered.$LG.fitted.log
+done
+
+# plot the maps for inspection
+
+Rscript scripts/lepmap_plot_map_fitted.R $OUTPUT $PREFIX
+
+# java FitStepFunction map=map.mapped [options]
+# options:       
+#     map=file    Input map, from OrderMarkers2 with phased data and physical marker coordinates (contig, pos, chr_name)
+# ***
+#     intervals=file  Intervals (in physical marker coordinates) from OrderMarkers2 calculateIntervals=file ...
+#     chromosome=NUM  take chromosome NUM from the maps
+#     chrContig=NAME [not set, takes most abundant contig] contig name of the chromosome
+#     noChromosome=1 [automatic] set when chromosome name is not in the input maps (contain only one chr)
+#     noChromosome=0 [automatic] set when chromosome name is in the input maps (contains several chrs)
+#     markerSupport=file   Store for each marker if it is supporting map position or not
+#     snps=file      get SNP names from a file (use maps directly from OrderMarkers2)

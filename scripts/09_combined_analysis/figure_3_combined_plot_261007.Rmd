@@ -1,0 +1,1878 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r enrichment_test_get_data}
+source("bin/genomic_enrichment_test_v8.R")
+source("bin/combined_analyses_functions.R")
+library(ggpubr)
+
+#dataframes from data_preparation_summary.Rmd
+#or
+combined_df_brp <- read.csv("tables/combined_df_incl_brp_rel_pos2026-10-02.csv")[-1]
+size_df <- read.csv("tables/size_file.csv")
+
+bg_df <- size_df[, c("chr","start", "end", "genome")] 
+bg_df$start <- bg_df$start - 1 # convert to bed
+```
+
+
+```{r ks_test_anc_proxy_vs_focal}
+
+# KS test: anc_proxy vs focal for each feature and type
+safe_ks_test <- function(df_group, value_col = "value") {
+  x <- df_group %>% filter(event_timing == "anc_proxy") %>% pull({{value_col}})
+  y <- df_group %>% filter(event_timing == "focal") %>% pull({{value_col}})
+
+  if (length(x) < 2 || length(y) < 2) {
+    return(tibble(
+      n_anc_proxy = length(x),
+      n_focal = length(y),
+      ks_statistic = NA_real_,
+      p_value = NA_real_
+    ))
+  }
+
+  ks_out <- suppressWarnings(ks.test(x, y))
+
+  tibble(
+    n_anc_proxy = length(x),
+    n_focal = length(y),
+    ks_statistic = unname(ks_out$statistic),
+    p_value = ks_out$p.value
+  )
+}
+
+# calculate genome average for selected features
+df_filt <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & !type %in% c("shared_fission", "Complex")) %>%
+  filter(feature %in% c("Recombination_rate", "Total_repeats", "Genes", "GC", "eig_scores")) %>%
+  ungroup()
+
+genome_average <- df_filt %>%
+  group_by(genome, feature) %>%
+  summarise(across(value, median, na.rm = TRUE), .groups = "drop")
+
+df_filt <- df_filt %>%
+  left_join(genome_average, by = c("genome", "feature"), suffix = c("", "_genome_avg")) %>%
+  mutate(value_norm = value / value_genome_avg)
+
+
+ks_results <- df_filt %>%
+  filter(event_timing %in% c("anc_proxy", "focal")) %>%
+  group_by(feature, type) %>%
+  group_modify(~ safe_ks_test(.x, value_col = "value_norm")) %>%
+  ungroup() %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+View(ks_results)
+
+write.csv(
+  ks_results,
+  file = paste("tables/result_ks_ancproxy_vs_focal_by_feature_type_", Sys.Date(), ".csv", sep = ""),
+  quote = FALSE,
+  row.names = FALSE
+)
+
+ks_results %>% filter(!is.na(p_adj) & p_adj < 0.05)
+```
+
+
+
+
+
+```{r enrichment_test_features}
+
+
+combined_df_brp %>% filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "Recombination_rate"
+            )) %>% group_by(genome, feature) %>% dplyr::summarize(median(value, na.rm=T))
+
+combined_df_brp %>% filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "Recombination_rate"
+            )) %>%
+  ggplot() +
+  geom_histogram(aes(value)) +
+  facet_wrap(~feature, scales = "free")
+
+n_perm=50000
+
+input_df <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & !type %in% c("shared_fission", "Complex")) %>%
+            filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "eig_scores",
+                "Recombination_rate"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end")
+
+
+opt <- list(
+    features = input_df,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_feat_", Sys.Date(), "_", n_perm, ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_feat_", Sys.Date(), "_", n_perm, ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+
+main(opt)
+
+enrich_feat <- read.csv(paste("tables/enrichment_results_feat_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+
+# 1. Compute effect size and correct for multiple testing
+#variables not included in the test
+vars_to_remove <- c("colinear")
+
+enrich_feat_filt <- enrich_feat %>% 
+  filter(!event_timing %in% vars_to_remove) %>%
+  mutate(
+    #delta = observed_stat - null_stat,          # unstandardised effect
+    z_score = (observed_stat - null_stat) / null_sd,   # use instead if SD available
+    p_adj = p.adjust(p_two_tailed, method = "BH"),
+    sig = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+
+write.table(enrich_feat_filt, file=paste("tables/enrichment_results_feat_formatted_", Sys.Date(), "_", n_perm, ".csv",sep = ""), row.names = F, quote = F)
+
+
+```
+
+
+```{r enrichment_ends}
+
+source("bin/genomic_enrichment_test_v8.R")
+
+bg_df_end <- combined_df_brp %>% filter(event_timing == "end") %>% select(chr,start, end, genome) %>% distinct() %>%
+  arrange(genome, chr, start) %>%
+  group_by(genome, chr) %>%
+  mutate(new_run = start != lag(end, default = first(start))) %>%
+  mutate(run_id = cumsum(new_run)) %>%
+  group_by(genome, chr, run_id) %>%
+  summarise(start = min(start), end = max(end), .groups = "drop") %>%
+  select(chr, start, end, genome) %>%
+  arrange(genome, chr, start)
+
+
+n_perm=50000
+
+input_df <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & !type %in% c("shared_fission", "Complex")) %>%
+            filter(feature %in% c(
+                "GC",
+                "Genes",
+                "Total_repeats",
+                "eig_scores",
+                "Recombination_rate"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") 
+
+
+opt <- list(
+    features = input_df,
+    bg_bed = as.data.table(bg_df_end),
+    output = paste("tables/enrichment_results_feat_end_", Sys.Date(), "_", n_perm, ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_feat_end_", Sys.Date(), "_", n_perm, ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+enrich_feat_end <- read.csv(paste("tables/enrichment_results_feat_end_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+
+# 1. Compute effect size and correct for multiple testing
+#variables not included in the test
+vars_to_remove <- c("shared_event_n4", "end", "colinear")
+
+enrich_feat_end_filt <- enrich_feat_end %>% 
+  filter(!event_timing %in% vars_to_remove) %>%
+  mutate(
+    #delta = observed_stat - null_stat,          # unstandardised effect
+    z_score = (observed_stat - null_stat) / null_sd,   # use instead if SD available
+    p_adj = p.adjust(p_two_tailed, method = "BH"),
+    sig = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+
+write.csv(enrich_feat_end_filt, file = paste("tables/enrichment_results_feat_end_formatted_", Sys.Date(), "_", n_perm, ".csv", sep = ""), row.names = F, quote = F)
+enrich_feat_end_filt <- read.csv(paste("tables/enrichment_results_feat_end_formatted_2026-10-07.csv"), header = TRUE)
+
+
+
+```
+
+
+```{r enr_test_plot}
+library(dplyr)
+library(ggplot2)
+
+text_size <- 12
+
+ref <- enrich_feat_filt %>%
+  filter(event_timing == "end", type == "colinear") %>%
+  select(feature, end_stat = observed_stat, bg_stat = background_stat)
+
+
+plot_df <- enrich_feat_filt %>%
+  filter(event_timing %in% c("focal", "anc_proxy"),
+         type %in% c("fission", "fusion", "fission-fusion")) %>%
+  left_join(ref, by = "feature") %>%
+  mutate(x_rescaled = (observed_stat - bg_stat) / (end_stat - bg_stat))
+
+#add significance from end test
+plot_df <- left_join(plot_df, 
+                     enrich_feat_end_filt %>% mutate(sig_end=sig,
+                                                     feature = as.factor(feature)) %>% select(feature, event_timing, type, sig_end) 
+)
+
+ plot_df$feature <- factor(
+  plot_df$feature,
+  levels = c("Recombination_rate", "Total_repeats", "Genes", "GC", "eig_scores")
+)
+
+feature_labels <- tibble::tribble(
+  ~feature,             ~label_left,           ~label_right,
+  "GC",                  "Lower GC",            "Higher GC",
+  "Genes",                "Higher CDS prop.","Lower CDS prop.",
+  "Total_repeats",        "Fewer repeats",       "More repeats",
+  "Recombination_rate",   "Higher rec. rate",     "Lower rec. rate",
+  "eig_scores",           "More A compart.",  "More B compart."
+) %>% mutate(type = "fission-fusion")   # only annotate the first facet column
+
+feature_labels <- feature_labels %>%
+  mutate(feature = factor(feature, levels = levels(plot_df$feature)))
+
+type_labels    <- c(fission = "Fission", fusion = "Fusion", `fission-fusion` = "Fission-fusion")
+feature_labels_y <- c(GC = "GC", Genes = "CDS", Total_repeats = "Total repeats",
+                      eig_scores = "eig_scores", Recombination_rate = "Rec. rate")
+
+x_labels <- c("Genomic background", "Chromosomal ends")
+
+#gradient background
+
+ # for plotting background rectangles
+plot_df <- plot_df %>%
+  mutate(feature_num = as.numeric(factor(feature)),
+         bg_group = feature_num %% 2)
+
+n_slices <- 50
+
+gradient_df <- distinct(plot_df, feature, type, bg_group) %>%
+  rowwise() %>%
+  reframe(
+    feature = feature, type = type, bg_group = bg_group,
+    x_edge = seq(-0.2, 3.5, length.out = n_slices + 1)  # n+1 edges for n slices
+  ) %>%
+  group_by(feature, type) %>%
+  mutate(
+    xmin = x_edge,
+    xmax = lead(x_edge),
+    slice_pos = (row_number() - 1) / (n() - 1),
+    alpha_val = if_else(bg_group == 0, slice_pos, 1 - slice_pos)
+  ) %>%
+  filter(!is.na(xmax)) %>%  # drops the final incomplete edge row
+  ungroup()
+
+# add significance labels from Kolmogorov-Smirnov tests
+ks_plot_df <- plot_df %>%
+  pivot_wider(
+    id_cols = c(feature, type, end_stat, bg_stat),
+    names_from = event_timing,
+    values_from = observed_stat,
+    values_fn = median
+  ) %>%
+  mutate(mid_point = (focal + anc_proxy) / 2) %>%
+  left_join(
+    ks_results %>%
+      select(feature, type, p_value, p_adj) %>%
+      mutate(sig_ks = case_when(
+        p_adj < 0.001 ~ "***",
+        p_adj < 0.01 ~ "**",
+        p_adj < 0.05 ~ "*",
+        TRUE ~ ""
+      )),
+    by = c("feature", "type")
+  )
+
+ks_plot_df <- ks_plot_df %>%
+  mutate(feature = factor(feature, levels = levels(plot_df$feature))) %>%
+  mutate(mid_rescaled = (mid_point - bg_stat) / (end_stat - bg_stat))
+
+
+enr_feat_plot <- ggplot(plot_df, aes(x = x_rescaled, y = 0)) +
+  # geom_rect(data = distinct(plot_df, feature, type, bg_group),
+  #           aes(fill = factor(bg_group)),
+  #           xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf,
+  #           inherit.aes = FALSE, alpha = 0.15, show.legend = FALSE) +
+  geom_rect(data = gradient_df,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, alpha = alpha_val),
+            fill = "grey70", inherit.aes = FALSE, show.legend = FALSE) +
+  scale_alpha_identity() +
+  geom_vline(xintercept = 0, linetype = "solid", colour = "tan4") +
+  geom_vline(xintercept = 1, linetype = "solid",  colour = "dodgerblue3") +
+  geom_line(aes(group = interaction(feature, type)),
+            colour = "grey20", linewidth = 0.8, linetype = "dotted") +
+  geom_text(aes(label = sig), vjust = 0.2, size = 7, colour = "tan4") +
+  geom_text(aes(label = sig_end), vjust = -0.05, size = 7, colour = "dodgerblue3") +
+  # geom_text(
+  #   data = ks_plot_df,
+  #   aes(x = mid_rescaled, y = 0.2, label = sig_ks),
+  #   inherit.aes = FALSE,
+  #   size = 7,
+  #   colour = "black"
+  # ) +
+  geom_text(data = feature_labels, aes(x = -0.8, y = 0, label = label_left),
+            inherit.aes = FALSE, hjust = 0, size = text_size/2.8) +
+  geom_text(data = feature_labels, aes(x = 3.6, y = 0, label = label_right),
+            inherit.aes = FALSE, hjust = 0, size = text_size/2.8) +
+  facet_grid(feature + type ~.,
+             #labeller = labeller(feature = feature_labels_y),
+             switch = "y") +
+  #ggnewscale::new_scale_fill() +
+  geom_point(aes(fill = event_timing, shape = type), size = 4) +
+ scale_fill_manual(name = "",
+                    breaks = c("focal", "anc_proxy"),
+                    labels = c("Focal genome", "Ancestral proxy"),
+                    values = c(focal = "grey20", anc_proxy = "white"),
+                    guide = guide_legend(
+      override.aes = list(shape = 21, colour = "grey20")
+    )
+  ) + scale_shape_manual(name = "Breakpoint type", 
+                       labels = c("Fission", "Fission-fusion", "Fusion"),
+                       limits = c("fission", "fission-fusion", "fusion"),
+                       values = c(25, 23, 24),
+                       drop = FALSE,
+                       guide = guide_legend(
+      override.aes = list(shape = c(25, 23, 24), colour = "grey20", fill = "grey20")
+    )
+) + 
+  scale_x_continuous(trans = scales::pseudo_log_trans(sigma = 0.3, base = 10), 
+                     expand = c(0, 0),
+                     breaks = c(0,1),
+                     labels = x_labels) +
+  scale_y_continuous(limits = c(-0.5, 1), expand = c(0, 0)) +
+  coord_cartesian(xlim = c(-0.2, 3.5), clip = "off") +
+  theme_classic(base_size = text_size) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.title = element_blank(),
+        axis.text.x = element_text(size = text_size),
+        strip.text = element_blank(),
+        strip.background = element_blank(),
+        #strip.placement = "outside",
+        panel.spacing = unit(0, "lines"),
+        legend.text = element_text(size = text_size),
+        legend.title = element_text(size = text_size),
+        legend.position = "inside",
+        legend.position.inside = c(1.15, 0.5),  # x > 1 pushes it outside the panel
+        plot.margin = margin(t = 10, r = 150, b = 10, l = 150, unit = "pt")
+        ) #+
+  #labs(x = "Rescaled values relative to genomic background (0) and chromosome ends (1)")
+
+#enr_feat_legend <- get_legend(enr_feat_plot + theme(legend.position = "right"))
+# ggsave(ggarrange(enr_feat_plot + theme(legend.position = "none"),
+#                  enr_feat_legend, nrow = 1, widths = c(2,1)), 
+#        filename = paste("plots/enr_forest_plot", Sys.Date(), ".pdf", sep = ""),
+#        width = 16,
+#        height = 6)
+
+```
+
+
+```{r enrichment_test_pop}
+
+input_df_pol <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & !type %in% c("shared_fission", "Complex")) %>%
+            filter(genome == "ilMecPoly1" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mpol"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") 
+opt <- list(
+    features = input_df_pol,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_pol_", Sys.Date(), "_", n_perm, ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_pol_", Sys.Date(), "_", n_perm, ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_lys <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & !type %in% c("shared_fission", "Complex")) %>% 
+            filter(genome == "ilMecLysi212" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mlys"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end")
+opt <- list(
+    features = input_df_lys,
+    bg_bed = as.data.table(bg_df),
+    output = paste("tables/enrichment_results_pop_lys_", Sys.Date(), "_", n_perm, ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_lys_", Sys.Date(), "_", n_perm, ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+```
+
+
+```{r enr_test_pop_write}
+enrich_pop_pol <- read.csv(paste("tables/enrichment_results_pop_pol_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+enrich_pop_lys <- read.csv(paste("tables/enrichment_results_pop_lys_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+
+enrich_pop_lys <- enrich_pop_lys %>% filter(feature == "pi_Mlys")
+
+enrich_pop_pol <- rbind(enrich_pop_pol, enrich_pop_lys)
+enrich_pop_pol <- enrich_pop_pol %>%
+  mutate(feature = case_when(
+    feature %in% c("pi_Mlys", "pi_Mpol") ~ "pi_both",
+    TRUE ~ feature
+  ),
+  event_timing = case_when(
+    feature %in% c("Fst", "dxy") & event_timing == "anc_proxy" ~ "focal",
+                           TRUE ~ event_timing))
+
+# 1. Compute effect size and correct for multiple testing
+
+enrich_pop_pol_mean <- enrich_pop_pol %>%
+  group_by(feature, event_timing, type) %>%
+  summarise(
+    observed_stat = mean(observed_stat, na.rm = TRUE),
+    background_stat = mean(background_stat, na.rm = TRUE),
+    null_stat = mean(null_stat, na.rm = TRUE),
+    null_sd = mean(null_sd, na.rm = TRUE),
+    p_two_tailed = mean(p_two_tailed, na.rm = TRUE),
+    n_roi = sum(n_roi_regions, na.rm = TRUE),
+    n_roi_windows = sum(n_roi_windows, na.rm = TRUE),
+    n_background_windows = sum(n_background_windows, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#variables not included in the test
+vars_to_remove <- c("shared_event_n4", "colinear")
+
+enrich_pop_pol_filt <- enrich_pop_pol_mean %>% 
+  filter(!event_timing %in% vars_to_remove) %>%
+  mutate(
+    #delta = observed_stat - null_stat,          # unstandardised effect
+    z_score = (observed_stat - null_stat) / null_sd,   # use instead if SD available
+    p_adj = p.adjust(p_two_tailed, method = "BH"),
+    sig = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+
+write.table(enrich_pop_pol_filt, file=paste("tables/enrichment_results_pop_formatted_", Sys.Date(), "_", n_perm, ".csv",sep = ""), row.names = F, quote = F)
+enrich_pop_pol_filt <- read.table(paste("tables/enrichment_results_pop_formatted_", Sys.Date(), "_", n_perm, ".csv",sep = ""), sep = " ", header = TRUE)
+
+```
+
+
+
+
+```{r enrichment_ends_pop}
+input_df_pol <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>%
+            filter(genome == "ilMecPoly1" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mpol"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end") 
+
+opt <- list(
+    features = input_df_pol,
+    bg_bed = as.data.table(bg_df_end),
+    output = paste("tables/enrichment_results_pop_pol_end_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_pol_end_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+
+
+input_df_lys <- combined_df_brp %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1") & type !="Complex") %>% 
+            filter(genome == "ilMecLysi212" &
+              feature %in% c(
+              "Fst",
+              "dxy",
+              "pi_Mlys"
+            )) %>% rename(roi_start = "i.start",
+                          roi_end = "i.end")
+opt <- list(
+    features = input_df_lys,
+    bg_bed = as.data.table(bg_df_end),
+    output = paste("tables/enrichment_results_pop_lys_end_", Sys.Date(), ".tsv",sep = ""),
+    plot = paste("plots/enrichment_results_pop_lys_end_", Sys.Date(), ".pdf",sep = ""),
+    n_perm = n_perm,
+    seed = 42
+)
+
+main(opt)
+```
+
+
+```{r enrichment_ends_pop_write}
+
+enrich_pop_pol <- read.csv(paste("tables/enrichment_results_pop_pol_end_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+
+enrich_pop_lys <- read.csv(paste("tables/enrichment_results_pop_lys_end_", Sys.Date(), "_", n_perm, ".tsv",sep = ""), sep = "\t")
+enrich_pop_lys <- enrich_pop_lys %>% filter(feature == "pi_Mlys")
+enrich_pop_pol <- rbind(enrich_pop_pol, enrich_pop_lys)
+enrich_pop_pol <- enrich_pop_pol %>%
+  mutate(feature = case_when(
+    feature %in% c("pi_Mlys", "pi_Mpol") ~ "pi_both",
+    TRUE ~ feature
+  ),
+  event_timing = case_when(
+    feature %in% c("Fst", "dxy") & event_timing == "anc_proxy" ~ "focal",
+                           TRUE ~ event_timing))
+
+# 1. Compute effect size and correct for multiple testing
+
+
+enrich_pop_pol_mean <- enrich_pop_pol %>%
+  group_by(feature, event_timing, type) %>%
+  summarise(
+    observed_stat = mean(observed_stat, na.rm = TRUE),
+    background_stat = mean(background_stat, na.rm = TRUE),
+    null_stat = mean(null_stat, na.rm = TRUE),
+    null_sd = mean(null_sd, na.rm = TRUE),
+    p_two_tailed = mean(p_two_tailed, na.rm = TRUE),
+    n_roi_windows = sum(n_roi_windows, na.rm = TRUE),
+    n_background_windows = sum(n_background_windows, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#variables not included in the test
+vars_to_remove <- c("shared_event_n4", "colinear", "end")
+
+enrich_pop_pol_filt_end <- enrich_pop_pol_mean %>% 
+  filter(!event_timing %in% vars_to_remove) %>%
+  mutate(
+    #delta = observed_stat - null_stat,          # unstandardised effect
+    z_score = (observed_stat - null_stat) / null_sd,   # use instead if SD available
+    p_adj = p.adjust(p_two_tailed, method = "BH"),
+    sig = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+
+write.table(enrich_pop_pol_filt_end, file=paste("tables/enrichment_results_pop_end_formatted_", Sys.Date(), "_", n_perm, ".csv",sep = ""), row.names = F, quote = F)
+
+enrich_pop_pol_filt_end <- read.csv(paste("tables/enrichment_results_pop_end_formatted_2026-10-07_50000.csv", sep = ""), sep = " ", header = TRUE)
+
+```
+
+
+```{r enr_test_pop_plot}
+
+ref_pop <- enrich_pop_pol_filt %>%
+  filter(event_timing == "end", type == "colinear") %>%
+  select(feature, end_stat = observed_stat, bg_stat = background_stat)
+
+
+pop_plot_df <- enrich_pop_pol_filt %>%
+  filter(event_timing %in% c("focal", "anc_proxy"),
+         type %in% c("fission", "fusion", "fission-fusion")) %>%
+  left_join(ref_pop, by = "feature") %>%
+  mutate(x_rescaled = (observed_stat - bg_stat) / (end_stat - bg_stat))
+
+#add significance from end test
+pop_plot_df <- left_join(pop_plot_df, 
+                     enrich_pop_pol_filt_end %>% mutate(sig_end=sig,
+                                                     feature = as.factor(feature)) %>% select(feature, event_timing, type, sig_end) 
+)
+
+feature_labels_pop <- tribble(
+  ~feature,   ~label_left,                              ~label_right,
+  "dxy",      "Higher~D[XY]",                           "Lower~D[XY]",
+  "Fst",      "Lower~F[ST]",                             "Higher~F[ST]",
+  "pi_both",  "Higher~pi",                               "Lower~pi"
+) %>%
+  mutate(type = "fission-fusion")
+
+type_labels    <- c(fission = "Fission", fusion = "Fusion", `fission-fusion` = "Fission-fusion")
+#feature_labels_y <- c(dxy = expression("D[XY]"), fst = expression("F[ST]"), pi_both = expression(pi))
+
+#gradient background
+
+ # for plotting background rectangles
+pop_plot_df <- pop_plot_df %>%
+  mutate(feature_num = as.numeric(factor(feature)),
+         bg_group = feature_num %% 2)
+
+n_slices <- 50
+
+gradient_df_pop <- distinct(pop_plot_df, feature, type, bg_group) %>%
+  rowwise() %>%
+  reframe(
+    feature = feature, type = type, bg_group = bg_group,
+    x_edge = seq(-0.8, 2, length.out = n_slices + 1)  # n+1 edges for n slices
+  ) %>%
+  group_by(feature, type) %>%
+  mutate(
+    xmin = x_edge,
+    xmax = lead(x_edge),
+    slice_pos = (row_number() - 1) / (n() - 1),
+    alpha_val = if_else(bg_group == 0, slice_pos, 1 - slice_pos)
+  ) %>%
+  filter(!is.na(xmax)) %>%  # drops the final incomplete edge row
+  ungroup()
+
+
+
+enr_pop_plot <- ggplot(pop_plot_df, aes(x = x_rescaled, y = 0)) +
+  # geom_rect(data = distinct(plot_df, feature, type, bg_group),
+  #           aes(fill = factor(bg_group)),
+  #           xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf,
+  #           inherit.aes = FALSE, alpha = 0.15, show.legend = FALSE) +
+  geom_rect(data = gradient_df_pop,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, alpha = alpha_val),
+            fill = "grey70", inherit.aes = FALSE, show.legend = FALSE) +
+  scale_alpha_identity() +
+  geom_vline(xintercept = 0, linetype = "solid", colour = "tan4") +
+  geom_vline(xintercept = 1, linetype = "solid",  colour = "dodgerblue3") +
+  geom_line(aes(group = interaction(feature, type)),
+            colour = "grey20", linewidth = 0.4, linetype = "dotted") +
+  geom_text(aes(label = sig), vjust = 0.2, size = 7, colour = "tan4") +
+  geom_text(aes(label = sig_end), vjust = -0.05, size = 7, colour = "dodgerblue3") +
+  geom_text(data = feature_labels_pop, aes(x = -1.55, y = 0, label = label_left),
+            inherit.aes = FALSE, hjust = 0, size = text_size/2.8, parse = T) +
+  geom_text(data = feature_labels_pop, aes(x = 2.05, y = 0, label = label_right),
+            inherit.aes = FALSE, hjust = 0, size = text_size/2.8, parse = T) +
+  facet_grid(feature + type ~.,
+             #labeller = labeller(feature = feature_labels_y),
+             switch = "y") +
+  ggnewscale::new_scale_fill() +
+  geom_point(aes(fill = event_timing, shape = type), size = 4) +
+ scale_fill_manual(name = "",
+                    breaks = c("focal", "anc_proxy"),
+                    labels = c("Focal genome", "Ancestral proxy"),
+                    values = c(focal = "grey20", anc_proxy = "white"),
+                    guide = guide_legend(
+      override.aes = list(shape = 21, colour = "grey20")
+    )
+  ) + scale_shape_manual(name = "Breakpoint type", 
+                       labels = c("Fission", "Fission-fusion", "Fusion"),
+                       limits = c("fission", "fission-fusion", "fusion"),
+                       values = c(25, 23, 24),
+                       drop = FALSE,
+                       guide = guide_legend(
+      override.aes = list(shape = c(25, 23, 24), colour = "grey20", fill = "grey20")
+    )
+) + 
+  scale_x_continuous(#trans = scales::pseudo_log_trans(sigma = 0.3, base = 10),
+                     expand = c(0, 0),
+                     breaks = c(0,1),
+                     labels = x_labels) +
+  scale_y_continuous(limits = c(-0.5, 1), 
+                     expand = c(0, 0)) +
+  coord_cartesian(xlim = c(-0.8, 2), clip = "off") +
+  theme_classic(base_size = text_size) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.title = element_blank(),
+        axis.text.x = element_text(size = text_size),
+        strip.text = element_blank(),
+        strip.background = element_blank(),
+        #strip.placement = "outside",
+        panel.spacing = unit(0, "lines"),
+        legend.text = element_text(size = text_size),
+        legend.title = element_text(size = text_size),
+        legend.position = "inside",
+        legend.position.inside = c(1.15, 0.5),  # x > 1 pushes it outside the panel
+        plot.margin = margin(t = 10, r = 150, b = 10, l = 150, unit = "pt")
+        )
+
+
+
+
+enr_feat_legend <- get_legend(enr_feat_plot + theme(legend.position = "right"))
+
+enrich_plot <- ggarrange(
+  ggarrange(enr_feat_plot + theme(legend.position = "none"),
+                 enr_pop_plot + theme(legend.position = "none"), ncol = 1, heights = c(2,1.2)),
+  enr_feat_legend, nrow = 1, widths = c(3,1))
+# ggsave(enrich_plot, 
+#        filename = paste("plots/enr_forest_plot_comb_", Sys.Date(), ".pdf", sep = ""),
+#        width = 12,
+#        height = 8)
+
+```
+
+
+```{r feature_df}
+
+feature_df <- combined_df_brp %>% filter(!type %in% c("shared_fission","Complex")) %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1")) %>% filter(feature %in% c("Genes", "Total_repeats", "Recombination_rate", "GC")) %>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing))
+
+
+
+feature_df$event_class <- paste(feature_df$event_timing, feature_df$type, sep = "_")
+unique(feature_df$event_class)
+feature_df$event_class <- factor(feature_df$event_class,
+levels = c("anc_proxy_fusion", "anc_proxy_fission-fusion", "focal_fusion", "focal_fission-fusion", "focal_fission", "shared_event_n4_shared_fission", "end_colinear", "colinear_colinear"))
+
+
+feature_df$event_timing <- factor(feature_df$event_timing,
+levels = c(  "colinear","end",  "focal", "anc_proxy","shared_event_n4")
+)
+feature_df$feature <- factor(feature_df$feature,
+                             levels = c("Recombination_rate", "Genes", "Total_repeats", "GC"))
+
+feature_df %>% group_by(event_timing, type) %>% count()
+
+unique(feature_df[feature_df$event_timing=="shared_event_n4","type"])
+
+feature_df[feature_df$event_timing=="shared_event_n4",]$type = "fission"
+
+feature_df %>% filter(feature == "Recombination_rate") %>%
+ggplot() +
+  geom_point(aes(start, value, colour = event_class), alpha = 0.6) +
+  facet_wrap(genome~chr) +
+    scale_colour_manual(values= c( "white", "white", "#333333","#333333","#333333", "#818181", "#CCCCCC", "tan"),
+                  name = "",
+                  labels = c("Ancestral proxy", "Breakpoint", "Ancestral breakpoint (1.3-1.6 My)", "Background", "End"))
+                  
+  
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+pi_df_pol <- combined_df_brp %>% filter(feature == "pi_Mpol" & genome == "ilMecPoly1") %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1"))%>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing)) %>% filter(event_timing != "NA") 
+
+pi_df_lys <- combined_df_brp %>% filter(feature == "pi_Mlys" & genome == "ilMecLysi212") %>% filter(type != "Complex") %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1"))%>% 
+  mutate(event_timing = case_when(window_mid < 200000 & type == "colinear" ~ "end", 
+                                (chr_length - window_mid) < 200000 & type == "colinear" ~ "end",
+                                TRUE ~ event_timing)) %>% filter(event_timing != "NA")
+
+pi_df <- rbind(pi_df_pol, pi_df_lys)
+
+unique(pi_df$event_timing)
+pi_df$event_timing <- factor(pi_df$event_timing,
+levels = c( "colinear","end",  "focal", "anc_proxy","shared_event_n4")
+)
+
+pi_df %>% group_by(event_timing, type) %>% count()
+
+unique(pi_df[pi_df$event_timing=="shared_event_n4","type"])
+
+pi_df[pi_df$event_timing=="shared_event_n4",]$type = "fission"
+
+my_labeller_pi <- labeller(type = c(colinear = "Background",
+           fission = "Fission",
+           'fission-fusion' = "Fission-fusion",
+           fusion="Fusion"))
+
+pi_plot_box <- 
+  pi_df %>% filter(event_timing!="shared_event_n4") %>% filter(!is.na(event_timing) & !is.na(feature) & type %in% c("colinear", "fission-fusion", "fusion", "fission") ) %>% 
+  ggplot() +
+    geom_boxplot(aes(x=event_timing, y=value, fill = event_timing),
+                 alpha = 0.8, outlier.colour = "grey30", show.legend = F) +
+  facet_grid(~type, scales = "free", drop = T, labeller = my_labeller_pi) +
+  #stat_pvalue_manual(result_all_test, "p.adj.signif", hide.ns = T) +
+  scale_fill_manual(values= c("tan", "tan4", "#999999", "white"),
+                  name = "Breakpoint type",
+                  labels = c("Background",  "End (200 kb from telomere)", "Focal genome", "Origin (ancestral proxy)")
+                    ) +
+    scale_x_discrete(labels = c(colinear = "Genome wide", end = "Ends", focal = "BRP", anc_proxy = "Anc. proxy")) +
+  labs(y = expression(pi)) +
+  theme(panel.background = element_rect(fill="white", colour = "grey30"),
+        strip.text = element_text(size = text_size),
+        strip.placement = "outside",
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.y = element_text(size = text_size, vjust = 0.5),
+        legend.text = element_text(size = text_size),
+        legend.title = element_text(size = text_size))
+
+pi_plot_box
+
+
+feat_div_box <- (feature_plot_box + theme(axis.text.x = element_blank())) / (pi_plot_box + theme(strip.text.x = element_blank())) + (diverg_plot_box + theme(legend.position = "none", strip.text.x = element_blank())) + patchwork::plot_layout(heights = c(2,0.95,2))
+
+
+
+ggsave(feat_div_box, filename=paste(OUTPUT, "plots/feat_box_fission_fusion.pdf", sep = ""), height = 12, width = 8)
+
+```
+
+
+
+```{r te_colour}
+
+te_palette <- c(
+  "Total_repeats" ="black",
+  "LTR"           = "red",
+  "LINE"            = "blue",
+  "DNA"           = "yellow2",
+  "RC"           = "orange",
+  "SINE"          = "lightblue",
+  "Simple_repeat" = "tan",
+  "Low_complexity" = "brown4",
+  "Overlapping"= "lightgrey",
+  "Unknown"       = "grey30"
+)
+```
+
+
+```{r dist_telomere}
+
+
+combined_df_brp %>% filter(feature %in% c("Total_repeats","LTR", "LINE", "DNA", "RC", "Simple_repeat","SINE", "Overlapping", "Low_complexity", "Unknown")) %>%
+ggplot(aes(rel_position, value)) +
+  #geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(aes(colour = feature), se = F) +
+  facet_wrap(~genome) +
+  scale_colour_manual(values = te_palette,
+                    name = "Repeat class") +
+  scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_rpt_", Sys.Date(), ".png", sep = ""),
+       height = 4,
+       width = 8)
+
+
+combined_df_brp %>% filter(feature %in% c("GC","Genes","eig_scores", "Recombination_rate")) %>%
+ggplot(aes(rel_position, value)) +
+  geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(se = F) +
+  facet_wrap(genome~feature,scales = "free", nrow = 2) +
+  #scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_feat_", Sys.Date(), ".png", sep = ""),
+       height = 6,
+       width = 12)
+
+combined_df_brp %>% filter(feature %in% c("pi_Mpol","pi_Mlys","dxy","Fst")) %>%
+ggplot(aes(rel_position, value)) +
+  geom_point(colour = "grey80", alpha = 0.8) +
+  geom_smooth(se = F) +
+  facet_wrap(~genome + feature, ncol = 4, scales = "free_y") +
+  #scale_y_continuous(transform = "log10") +
+  theme(panel.background = element_blank(),
+        panel.grid.major = element_line(colour = "grey80"),
+        panel.grid.minor = element_blank())
+
+ggsave(paste("plots/dist_to_telo_popgen_", Sys.Date(), ".png", sep = ""),
+       height = 6,
+       width = 12)
+
+
+```
+
+
+
+
+```{r comp_length}
+
+rec_vs_comp.df <- combined_df_brp %>% filter(feature %in% c("Recombination_rate", "eig_scores")) %>% select(-window_id) %>% pivot_wider(names_from = feature, values_from = value)
+
+comp_df_raw$chr <- clean_chr(comp_df_raw$chr)
+
+rec_vs_comp.df <- left_join(rec_vs_comp.df, comp_df_raw) %>% mutate(
+  genome = factor(genome, levels = c("ilMecPoly1", "ilMecLysi212")))
+
+
+
+comp_length <- rec_vs_comp.df %>% select(genome, chr, start, end, compartment, Recombination_rate) %>% arrange(genome, chr, start) %>%
+group_by(genome, chr) %>%
+mutate(run_id = cumsum(row_number() == 1 | compartment != lag(compartment))) %>%
+group_by(genome, chr, run_id, compartment) %>%
+summarise(start = min(start),
+          end = max(end),
+          .groups = "drop") %>%
+arrange(genome, chr, start)
+
+comp_length$comp_length <- comp_length$end - comp_length$start
+
+comp_length <- comp_length[, c("genome", "chr", "start", "end", "compartment", "comp_length")]
+
+write_tsv(comp_length, file = "tables/compartment_lengths.bed", col_names = F)
+
+comp_length %>% 
+ggplot(aes(y = compartment)) +
+  geom_segment(
+    aes(x = start, xend = end, yend = compartment, colour = compartment),
+    linewidth = 3,
+    lineend = "butt"
+  ) +
+  facet_wrap(~ genome + chr, scales = "free_x", nrow = 2) +
+  labs(x = "Genomic position", fill = "Compartment") +
+  theme_bw()
+
+compartment_cols <- c(
+  A = "#EEE1A6",
+  B = "cyan4"
+)
+
+
+
+# excluding the W
+comp_len_distr <- comp_length %>% filter(!is.na(compartment) & !chr %in% c("W", "W1", "W2")) %>% 
+  ggplot(aes(compartment, comp_length/1000000)) +
+  geom_boxplot(aes(fill=compartment), outliers = TRUE, alpha = 0.8, outlier.color = "grey70") +
+  stat_compare_means() +
+  stat_summary(
+    geom = "text",
+    fun.data = function(x) data.frame(y = -Inf, label = paste0("n=", length(x))),
+    size = 5, vjust = -0.5
+  ) +
+  facet_grid(~genome) +
+  scale_y_continuous(#transform = "log10",
+                    name = "Compartment length (Mb)") +
+  scale_fill_manual(name = "Compartment", 
+                    values = compartment_cols) +
+  theme_classic() +
+  theme(axis.title.x = element_blank())
+
+comp_length %>% filter(!is.na(compartment)) %>% 
+  ggplot(aes(comp_length/1000000)) +
+  geom_histogram(aes(fill = compartment), alpha = 0.8, bins = 100) +
+  xlim(0,5) +
+  facet_wrap(~genome)
+
+comp_length %>% group_by(genome, chr, compartment) %>% count()
+comp_length %>% group_by(genome, compartment) %>% count()
+
+ggsave(comp_len_distr, filename = paste("plots/comp_comb_length_box_", Sys.Date(), ".png", sep = ""),
+       height = 4,
+       width = 6)
+  
+```
+
+
+
+```{r rec_comp_violin}
+
+my_labeller_comp1 <- labeller(
+  genome = c(
+    ilMecPoly1   = "italic('Mechanitis polymnia')",
+    ilMecLysi212 = "italic('Mechanitis lysimnia')"
+  ),
+  .default = label_parsed
+)
+
+rec_comp_plot <- rec_vs_comp.df %>% dplyr::filter(!is.na(compartment)) %>% 
+select(genome, compartment, Recombination_rate) %>% distinct() %>%
+  ggplot(aes(compartment, Recombination_rate)) +
+  geom_violin(aes(compartment, Recombination_rate, fill = compartment), alpha = 0.8) +
+  geom_boxplot( outliers = FALSE, width = 0.3, fill = "grey90") +
+  ggpubr::stat_compare_means(size = text_size/2.8, vjust = 1) +
+  facet_grid(~genome, labeller = my_labeller_comp1) +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(0,15)) +
+  scale_x_discrete(name = "Compartment") +
+  scale_fill_manual(name = "Compartment",
+                    values = compartment_cols) +
+  theme_classic() + theme(legend.position = "none",
+                          axis.title.x = element_blank(),
+                          axis.title.y = element_text(size = text_size),
+                          axis.text = element_text(size = text_size),
+                          strip.text = element_text(size = text_size),
+                          strip.background = element_blank())
+  
+
+
+rec_vs_comp.df %>% filter(!is.na(compartment)) %>% group_by(genome, compartment) %>% summarise(median(Recombination_rate, na.rm = T))
+
+
+```
+
+
+
+
+```{r compartment_vs_breakpoints}
+library(data.table)
+
+# Expected columns:
+# roi_df:  chr, start, end, type
+# feat_df: chr, start, end, feature  (values: "A", "B")
+
+roi_df <- break_df %>% select(chr, start, end, type, event_timing, genome)
+feat_df <- comp_length
+
+setDT(roi_df);  setDT(feat_df)
+roi_df[, roi_id := .I]  # unique ID per ROI
+
+hits <- roi_df[feat_df,
+               on = .(genome, chr, start < end, end > start),
+               nomatch = NULL,
+               .(roi_id = x.roi_id, genome = x.genome, chr=x.chr, start=x.start, type = x.type, event_timing = x.event_timing, feature = i.compartment)]
+
+roi_features <- hits[, .(features = list(sort(unique(feature)))), by = .(roi_id, type, event_timing, genome, chr)]
+roi_features[, overlap_class := fcase(
+  sapply(features, function(f) identical(f, "A")),        "A",
+  sapply(features, function(f) identical(f, "B")),        "B",
+  sapply(features, function(f) all(c("A", "B") %in% f)), "A or B",
+  default = "other"
+)]
+
+
+write.csv(as.data.frame(roi_features[,-6]), file = paste(OUTPUT, "tables/breakpoints_and_compartments_", Sys.Date(), ".csv", sep = ""), quote = F, row.names = F)
+
+
+result <- roi_features[, .N, by = .(genome, type, event_timing, overlap_class)]
+dcast(result, type ~ overlap_class, value.var = "N", fill = 0)
+
+brp_comp_plot_all <- ggplot(result, 
+                        aes(x = event_timing, y = N, fill = overlap_class)) +
+  geom_col(alpha = 0.7) +
+  scale_fill_manual(
+    values = c(compartment_cols,
+      "A or B" = "grey70"
+    ),
+    name = "Overlaps"
+  ) +
+  labs(x = "ROI type", y = "Count") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(brp_comp_plot_all, filename = paste(OUTPUT, "plots/comp_comb_brp_all_", Sys.Date(), ".png", sep = ""),
+       height = 8,
+       width = 12)
+
+
+my_labeller_barplot <- labeller(
+  event_timing = c(
+    focal   = "Breakpoints",
+    anc_proxy = "Anc. proxy"
+  ))
+```
+
+
+```{r E3}
+
+combined_df_brp %>% filter(feature=="E3") %>% 
+  ggplot() + 
+  geom_point(aes(start/1000000, value, colour=value < 0), size = 0.1, show.legend = FALSE) + 
+  geom_vline(data=combined_df_brp %>% filter(feature=="E3" & !type %in% c("Complex", "colinear") & event_timing %in% c("focal")),
+             mapping = aes(xintercept=start/1000000, linetype = event_timing), colour = "grey40") +
+  facet_wrap(~genome + chr, scales = "free_x", nrow = 2) +
+  scale_y_continuous(name = "E3") +
+  scale_x_continuous(name = "Genomic position (Mb)") +
+  scale_linetype_manual(name = "Breakpoints", 
+                        values = c("solid"),
+    labels = c("Breakpoints")) +
+    theme(strip.background = element_rect(fill = "grey90", colour = "grey90"),
+        strip.text = element_text(size = text_size),
+        axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.x = element_text(size = text_size),
+        axis.title.y = element_text(size = text_size, angle = 0, vjust = 0.5),
+        panel.background = element_rect(colour = "black", fill = "transparent"),
+        panel.grid.major = element_line(colour = "grey90")
+        )
+
+ggsave(paste("plots/E3_vs_breakpoints_", Sys.Date(), ".pdf", sep = ""),
+       height = 8,
+       width = 24)
+
+```
+
+
+```{r compartment_vs_breakpoints_plot}
+brp_comp_sum <- result %>% filter(event_timing %in% c( "focal", "anc_proxy")) 
+
+brp_comp_sum$event_timing <- factor(brp_comp_sum$event_timing,
+levels = c( "focal", "anc_proxy"))
+
+brp_comp_plot <- ggplot(brp_comp_sum, 
+                        ) +
+  geom_bar(aes(x = type, y = N, fill = overlap_class), stat = "identity", alpha = 0.8) +
+  facet_wrap(~event_timing, labeller = my_labeller_barplot) +
+  scale_fill_manual(values = c(compartment_cols,
+      "A or B" = "grey70"
+    ),
+    name = "Compartment"
+  ) +
+  labs(x = "", y = "Breakpoints (count)") +
+  scale_x_discrete(labels = c("Fiss.", "Fiss.-fus.", "Fus.")) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = text_size),
+        legend.position = "inside",
+        legend.position.inside = c(.4,.80),
+        legend.text = element_text(size = text_size),
+        legend.title = element_text(size = text_size),
+        axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.y = element_text(size = text_size)
+        )
+
+brp_comp_plot
+```
+
+```{r comp_vs_breakpoint}
+
+
+# ilMecPoly1
+# 11
+# 5360096
+# 5365971
+# anc_proxy
+# fusion
+# A
+# 
+# ilMecLysi2… 13    7.1 e6 7.20e6 7192328 7.39e6 focal        fusi…   12790513    7150000   5640513
+# 2 ilMecLysi2… 13    7.20e6 7.3 e6 7192328 7.39e6 focal        fusi…   12790513    7250000   5540513
+# 3 ilMecLysi2… 13    7.3 e6 7.4 e6 7192328 7.39e6 focal        fusi…   12790513    7350000   5440513
+# rec_vs_comp.df %>% 
+# +     filter(event_timing == "focal" & chr == "13") %>% select(compartment)
+# # A tibble: 3 × 1
+#   compartment
+#   <chr>      
+# 1 A          
+# 2 B          
+# 3 B          
+# 
+# 
+# ilMecLysi212
+# 04
+# 11195219
+# 11223413
+# anc_proxy
+# fission-fusion
+# A
+# 
+# ilMecPoly1  11    5.3 e6 5.40e6 5360096 5.37e6 focal        fiss…   16717337    5350000   5350000 A ilMecPoly1  03 all B
+
+
+
+```
+
+```{r end_and_gw_comp}
+
+size_df$chr <- clean_chr(size_df$chr)
+comp_length_tot <- comp_length %>%
+  left_join(size_df %>% select(genome, chr, end) %>% rename(chr_length = "end"), by = c("genome", "chr"))
+
+
+overall_prop <- comp_length_tot %>%
+  group_by(genome, compartment) %>%
+  summarise(total_length = sum(comp_length),
+            genome_size = sum(unique(chr_length)),
+            .groups = "drop") %>%
+  mutate(proportion = total_length / genome_size)
+
+overall_prop
+
+
+#Proportion of windows covering compartment
+
+label_df <- rec_vs_comp.df %>% filter(!chr %in% c("W1","Z1", "Z2", "W" , "Z")) %>%
+  filter(!is.na(event_timing), event_timing != "",
+         !type %in% c("shared_fission", "Complex")) %>%
+  mutate(compartment = case_when(is.na(compartment) ~ "Unclassified", TRUE ~ compartment),
+         compartment = factor(compartment, levels = c("Unclassified", "A", "B"))) %>%
+  count(event_timing, type, compartment, name = "n_obs") %>%
+  group_by(event_timing, type) %>%
+  mutate(
+    total = sum(n_obs),
+    prop = n_obs / total
+  ) %>%
+  arrange(event_timing, type, compartment) %>%
+  mutate(
+    ymax = cumsum(prop),
+    ymin = ymax - prop,
+    y_mid = (ymin + ymax) / 2
+  ) %>%
+  ungroup()
+
+df_grouped <- label_df %>%
+  mutate(group = paste(event_timing, type, sep = ".")) %>%
+  group_by(group, compartment) %>%
+  summarise(n = sum(n_obs), .groups = "drop") %>% filter(compartment != "Unclassified")
+
+df_grouped
+
+
+
+# Wide table once: one row per group, one column per compartment
+wide <- df_grouped %>%
+  pivot_wider(names_from = compartment, values_from = n, values_fill = 0)
+
+mat_all <- as.matrix(wide[, -1])
+rownames(mat_all) <- wide$group
+
+# All unordered pairs, as a data frame
+pairs_df <- as_tibble(t(combn(rownames(mat_all), 2)), .name_repair = ~ c("group1", "group2"))
+
+ref <- c("colinear.colinear", "end.colinear")
+
+# Every other group compared with each reference (reference always group1)
+pairs_ref <- expand.grid(group1 = ref,
+                         group2 = setdiff(rownames(mat_all), ref),
+                         stringsAsFactors = FALSE) %>%
+  as_tibble()
+
+# Add the two fixed comparisons (order as written: first group = group1)
+pairs_extra <- tibble(
+  group1 = c("focal.fusion", "focal.fission-fusion", "focal.fission", ref[1]),
+  group2 = c("anc_proxy.fusion",     "anc_proxy.fission-fusion", "anc_proxy.fission", ref[2]),
+)
+
+# Optionally drop end.colinear vs colinear.colinear if it duplicates
+# the reference comparison; here it is kept once, as colinear.colinear first
+pairs_sel <- bind_rows(pairs_ref, pairs_extra) %>%
+  filter(!(group1 == "end.colinear" & group2 == "colinear.colinear")) %>%
+  distinct()
+
+pairwise_sel <- pmap_dfr(pairs_sel, function(group1, group2) {
+  mat  <- mat_all[c(group1, group2), , drop = FALSE]
+  test <- fisher.test(mat)
+
+  mat_c <- if (any(mat == 0)) mat + 0.01 else mat
+  or_ha <- (mat_c[1, 1] * mat_c[2, 2]) / (mat_c[1, 2] * mat_c[2, 1])
+  se    <- sqrt(sum(1 / mat_c))
+
+  tibble(
+    group1, group2,
+    odds_ratio_fisher = unname(test$estimate),
+    odds_ratio_HA     = or_ha,
+    ci_low  = exp(log(or_ha) - 1.96 * se),
+    ci_high = exp(log(or_ha) + 1.96 * se),
+    p_value = test$p.value
+  )
+}) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+pairwise_sel <- pairwise_sel %>% arrange(group1, group2)
+
+sig_labels_bar <- pairwise_sel %>%
+  mutate(
+    sig = case_when(
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01  ~ "**",
+      p_adj < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+
+sig_labels_bar
+write.table(sig_labels_bar, file = "tables/fisher_tst_result_compartments.tsv", row.names = F, quote = F)
+
+sig_plot <- sig_labels_bar %>%
+  filter(sig != "") %>%
+  mutate(
+    group1_event = sub("\\..*", "", group1),
+    group1_type  = sub("^[^.]*\\.", "", group1),
+    group2_event = sub("\\..*", "", group2),
+    group2_type  = sub("^[^.]*\\.", "", group2)
+  ) %>%
+  filter(group1_type == group2_type | 
+         group2_event == "end") %>%
+  mutate(
+    type = group1_type,
+    y.position = 1.015
+  )
+
+sig_annot <- sig_labels_bar %>%
+  filter(sig != "") %>%
+  mutate(
+    # Split names such as "colinear.colinear"
+    group1_event = str_split_fixed(group1, "\\.", 2)[, 1],
+    group1_type  = str_split_fixed(group1, "\\.", 2)[, 2],
+    
+    group2_event = str_split_fixed(group2, "\\.", 2)[, 1],
+    group2_type  = str_split_fixed(group2, "\\.", 2)[, 2]
+  ) 
+
+x_levels <- c("anc_proxy", "colinear", "end", "focal")
+
+sig_annot <- sig_annot %>%
+  mutate(
+    x1 = match(group1_event, x_levels),
+    x2 = match(group2_event, x_levels)
+  )
+
+
+sig_annot_background <- sig_annot %>%
+  filter(group1_event == "colinear" & group2_event != "end") %>% 
+  rename(event_timing = "group2_event",
+         type = "group2_type")  %>%
+  mutate(y_pos = 1.07)
+
+
+  my_labeller_barplot <- labeller(
+  type = c(
+    colinear = "Background",
+    fission = "Fission",
+    'fission-fusion' = "Fission-fusion",
+    fusion = "Fusion"
+  ))
+
+
+
+brp_comp_plot <- 
+  label_df %>%  
+  ggplot(aes(x = event_timing, y = n_obs, fill = compartment)) +
+  geom_bar(stat = "identity", position = "fill", alpha = 0.8) +
+  geom_text(data = label_df,
+            aes(x = event_timing, y = 1 - y_mid, label = n_obs),
+            inherit.aes = FALSE, colour = "black", size = text_size/2.8) +
+  geom_text(data = sig_annot_background %>% filter(group2 == "focal.fission"),
+            aes(x = event_timing, y = y_pos, label = sig),
+            inherit.aes = FALSE, size = (text_size + 2)/2.8, vjust = 0.5
+            ) +
+  geom_text(data = sig_annot_background %>% filter(group2 == "anc_proxy.fusion"),
+            aes(x = event_timing, y = y_pos + 0.06, label = sig),
+            inherit.aes = FALSE, size = (text_size + 2)/2.8, vjust = 0.5
+            ) +
+  stat_pvalue_manual(
+    sig_plot,
+    label = "sig",
+    xmin = "group1_event",
+    xmax = "group2_event",
+    y.position = "y.position",
+    tip.length = 0.000005,
+    #bracket.size = 0.4,
+    size = (text_size + 2)/2.8
+  ) +
+  facet_grid(~ type, #switch = "x", 
+             drop = T, 
+             scales = "free_x", space = "free",
+             labeller = my_labeller_barplot) +
+  scale_fill_manual(values = c(compartment_cols),
+    name = "Compartment"
+  ) +
+  labs(y = "Proportion of windows") +
+  scale_x_discrete(position = "bottom",
+                     labels = c("anc_proxy"="Anc.", "colinear" = "GW",  "end" = "Ends", "focal" = "Focal")) +
+  #scale_y_continuous(limits = c(0,1.2)) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        #strip.placement = "outside",
+        strip.text.x.top = element_text(size = text_size),
+        legend.text = element_text(size = text_size),
+        legend.title = element_text(size = text_size),
+        axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.y = element_text(size = text_size),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top",
+        panel.spacing = unit(1, "points")
+        )
+
+
+brp_comp_plot
+
+
+
+```
+
+
+```{r plot_pc2}
+
+# combined_df_brp %>% filter(feature %in% c("E2_corr", "Recombination_rate","Total_repeats", "GC", "Genes")) %>% filter(!chr %in% c("Z","Z1","Z2","W", "W1")) %>% #filter(genome == "ilMecPoly1") %>%
+#   ggplot(aes(rel_position, value), colour = "grey") + 
+#   geom_line(aes(rel_position, value)) + 
+#   geom_smooth(aes(rel_position, value)) +
+#   facet_wrap(~feature, scales = "free_y", nrow = 4) 
+
+end_interactions_df <- combined_df_brp %>% filter(feature %in% c("E2_corr", "Recombination_rate","Total_repeats", "GC", "Genes")) %>% filter(!chr %in% c("Z","Z1","Z2","W", "W1")) 
+
+end_interactions_df$feature <- factor(end_interactions_df$feature,
+levels = c("Recombination_rate","Total_repeats","Genes", "GC", "E2_corr"))
+
+end_interactions_df <- end_interactions_df %>% mutate(value=case_when(feature %in% c("Total_repeats", "GC", "Genes") ~ value*100,
+                                                           TRUE ~ value))
+
+my_labeller_ends <- as_labeller(c(Recombination_rate="Recomb. rate (cM/Mb)", Total_repeats="Total repeats (%)", GC="GC-content (%)", Genes="CDS content (%)", E2_corr="Interaction (PC2)")
+                           )
+
+end_plot <- end_interactions_df %>% 
+  ggplot(aes(rel_position, value)) + 
+  geom_line(aes(rel_position, value), colour = "grey70") + 
+  geom_smooth(aes(rel_position, value), colour = "grey30", span=0.01) +
+  facet_wrap(~feature, scales = "free_y", nrow = 5, 
+             strip.position = "left", labeller = my_labeller_ends) +
+  scale_x_continuous(name = "Relative distance from telomere") +
+  theme(axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text = element_text(size = text_size),
+        axis.text.x = element_text(size = text_size),
+        axis.text.y = element_text(size = text_size),
+        axis.title.x = element_text(size = text_size),
+        panel.background = element_rect(colour = "black", fill = "transparent"),
+        panel.grid.major = element_line(colour = "grey90")
+        )
+
+end_plot
+ggsave(filename = paste(OUTPUT, "plots/PC2_rec_rate_rpt_gc", Sys.Date(), ".pdf", sep = ""),
+       width = 6,
+       height = 10)
+
+end_interactions_df %>% select(-window_id) %>% pivot_wider(names_from = feature, values_from = value) %>%
+  ggplot(aes(Recombination_rate, E2_corr)) +
+  geom_point() +
+  geom_smooth() +
+  stat_cor(method = "spearman", cor.coef.name = "rho") +
+  theme_classic()
+
+
+
+```
+
+
+```{r plot_ms}
+
+rec_com_df  <- combined_df_brp %>% filter(feature == "Recombination_rate" & !(chr %in% c("Z", "Z1", "Z2", "W", "W1", "W2")))
+
+# Classify each chromosome as colinear (all windows colinear) or rearranged (any non-colinear window)
+chr_class <- rec_com_df %>%
+  group_by(genome, chr) %>%
+  summarise(chr_category = if (all(event_timing %in% c("colinear", "end", "shared_event_n4", "anc_proxy"), na.rm = TRUE)) "colinear" else "rearranged",
+            .groups = "drop")
+
+# Modify chr_class to correct for sex chr fusions
+
+
+rec_com_df <- left_join(rec_com_df, chr_class)
+
+mec_colors = c("ilMecPoly1" = "#2166AC", "ilMecLysi212" = "darkorange")
+
+chr_ends <- 
+rec_com_df %>% filter(!is.na(chr_category)) %>%
+  ggplot(aes(rel_position, value)) +
+  #geom_point() +
+  geom_smooth(aes(colour = genome, linetype = chr_category), se = F) +
+    scale_x_continuous(name = "Relative distance from telomere") +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(0,4.5)) +
+  scale_linetype_manual(values = c("solid", "dashed"),
+                        labels = c("Collinear", "Rearranged"),
+                        name = "Chromosome category",
+                        guide = guide_legend(
+                          override.aes = list(fill = "white", colour = "black"))
+                        ) +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia"))),
+                      guide = "none") +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=text_size),
+        legend.title = element_text(size=text_size),
+        axis.text = element_text(size=text_size),
+        axis.title = element_text(size=text_size),
+        )
+
+# unique(combined_df_brp$closest_break_type)
+#  [1] "fusion_anc_proxy"               "Complex_anc_proxy_n4"          
+#  [3] "Complex_focal_n4"               "fusion_focal"                  
+#  [5] "fission-fusion_anc_proxy"       "shared_fission_shared_event_n4"
+#  [7] "fission-fusion_focal"           "Complex_shared_event"          
+#  [9] "colinear_end"                   "fission_anc_proxy"             
+# [11] "fission_focal" 
+
+```
+
+```{r plot_rec_rate2}
+rec_brp <- 
+rec_com_df %>% filter(closest_break_type %in% c("fission_focal", "fission-fusion_focal", "fusion_focal")) %>%
+  ggplot(aes(dist_bp_kb/1000000, value)) +
+  #geom_point() +
+  geom_smooth(aes(linetype = closest_break_type, colour = genome), se = F, linewidth = 1) +
+  scale_x_continuous(limits = c(0, 5),
+                     name = "Distance from rearrangement breakpoint (Mb)") +
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(0,4.5)) +
+  scale_linetype_manual(values = c( "dotted","dashed", "solid"),
+                        labels = c("Fission", "Fission-fusion", "Fusion"),
+                        name = "Breakpoint",
+                        guide = guide_legend(
+                          override.aes = list(fill = "white", colour = "black"))
+                          ) +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. lysimnia")), expression(italic("M. polymnia"))),
+                      guide = "none") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=text_size),
+        legend.title = element_text(size=text_size),
+        axis.text = element_text(size=text_size),
+        axis.title = element_text(size=text_size)
+        )
+
+
+```
+
+
+```{r}
+
+
+chr_med_rr <- rec_com_df %>% filter(feature == "Recombination_rate") %>% group_by(genome, chr, chr_length) %>% summarise(med_rec_rate=median(value)) %>% left_join(., chr_class) %>% filter(!is.na(chr_category)) %>% mutate(
+  genome = factor(genome, levels = c("ilMecPoly1", "ilMecLysi212"))
+)
+
+summary(lm(med_rec_rate ~ chr_length*genome + chr_category*genome + chr_length*chr_category*genome, data = chr_med_rr))
+
+model_full <- lm(med_rec_rate ~ chr_length * genome * chr_category, data = chr_med_rr)
+summary(model_full)
+
+summary(lm(med_rec_rate ~ chr_length * chr_category, data = chr_med_rr %>% filter(genome == "ilMecPoly1")))
+
+summary(lm(med_rec_rate ~ chr_length * chr_category, data = chr_med_rr %>% filter(genome == "ilMecLysi212")))
+
+chr_med_rr$chr_length_mb <- chr_med_rr$chr_length/1000000
+
+mixed_model <- lmer(
+  med_rec_rate ~ chr_length_mb * chr_category + (1 + chr_length_mb | genome), 
+  data = chr_med_rr
+)
+
+library(lmerTest)
+library(performance)
+summary(simplified_mixed_model)
+# Use this simplified version only if the first model throws a warning
+simplified_mixed_model <- lmer(med_rec_rate ~ chr_length_mb * chr_category + (1 | genome), data = chr_med_rr)
+
+model_performance(simplified_mixed_model)
+
+```
+
+
+```{r plot_rr_chr}
+View(rec_com_df)
+
+fill_colors <- c(
+  "colinear.ilMecPoly1"   = "#2166AC", # Custom species color
+  "rearranged.ilMecPoly1" = "white",
+  "colinear.ilMecLysi212"   = "darkorange", # Custom species color
+  "rearranged.ilMecLysi212" = "white"
+)
+
+
+genome_levels <- levels(chr_med_rr$genome)
+
+label_sp <- labeller(genome = c(ilMecPoly1 ="M. polymnia",
+                                   ilMecLysi212 = "M. lysimnia"))
+
+
+chr_rr_box <- chr_med_rr %>%
+    ggplot() +
+    geom_boxplot(aes(chr_category, med_rec_rate, fill = interaction(chr_category, genome), colour = genome), alpha = 0.6, outliers = F) +
+  geom_jitter(aes(chr_category, med_rec_rate, fill = interaction(chr_category, genome), colour = genome)) +
+  facet_wrap(~genome, strip.position = "bottom", labeller = label_sp) +  
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(2,6)) +
+  scale_fill_manual(
+    name = "Chromosome category",
+    values = fill_colors,
+    breaks = c("colinear.ilMecPoly1", "rearranged.ilMecPoly1"),
+    labels = c("Collinear","Rearranged")
+    ) +
+    geom_text(
+      data = tibble(
+        genome = factor("ilMecPoly1", levels = genome_levels),
+        x = 0.65,
+        y = 5.7,
+        label = "Estimate = -2.503,\np = 0.011"
+      ),
+      aes(x = x, y = y, label = label),
+      inherit.aes = FALSE,
+      hjust = 0,
+      vjust = 0.5,
+      size = text_size / 2.8
+    ) +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. polymnia")), expression(italic("M. lysimnia")))) +
+  #coord_cartesian(clip = "off") +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text = element_text(size=text_size, face = "italic"),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=text_size),
+        legend.title = element_text(size=text_size),
+        axis.text.y = element_text(size=text_size),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size=text_size),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank()
+        )
+
+
+label_cat <- labeller(chr_category = c(colinear ="Collinear",
+                                   rearranged = "Rearranged"))
+facet_model_labels <- tibble(
+  chr_category = c("colinear", "rearranged"),
+  x = c(8, 8),
+  y = c(5.7, 5.7),
+  label = c(
+    " Slope = -0.122,\n p = 0.011",
+    " Slope = 0.0008,\n p = 0.024"
+  )
+) %>%
+  mutate(chr_category = factor(chr_category, levels = c("colinear", "rearranged")))
+
+
+chr_rr_point <- 
+  chr_med_rr %>%
+    ggplot(aes(chr_length/1000000, med_rec_rate)) +
+    geom_point(aes(fill = interaction(chr_category, genome), colour = genome), shape = 21, size = 6, stroke = 1) +
+  facet_wrap(~chr_category, labeller = label_cat) +  
+  scale_y_continuous(name = "Recomb. rate (cM/Mb)",
+                     limits = c(2,6)) +
+  scale_fill_manual(
+    name = "Chromosome category",
+    values = fill_colors,
+    breaks = c("colinear.ilMecPoly1", "rearranged.ilMecPoly1"),
+    labels = c("Collinear","Rearranged")
+    ) +
+  scale_x_continuous(name = "Chromosome length (Mb)") +
+  scale_colour_manual(name = "Species",
+                      values = mec_colors,
+                      labels = c(expression(italic("M. polymnia")), expression(italic("M. lysimnia")))) +
+  guides(colour = guide_legend(
+    override.aes = list(
+      shape = 16        
+    )
+  )) +
+    geom_text(
+    data = facet_model_labels,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    color = "black",
+    hjust = 0,
+    vjust = 0.5,
+    size = text_size / 2.8
+  ) +
+    ggnewscale::new_scale_colour() +
+    geom_text(aes(label = chr, colour = chr_category), show.legend = F) +
+   geom_smooth(method = "lm", colour = "black", se = F) +
+    scale_colour_manual(values = c("colinear" = "white", "rearranged" = "black")) +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black", linewidth = 0.5),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.key.width = unit(1, "cm"),
+        legend.text = element_text(size=text_size),
+        legend.title = element_text(size=text_size),
+        axis.text.y = element_text(size=text_size),
+        axis.text.x = element_text(size=text_size),
+        axis.title.y = element_text(size=text_size),
+        axis.title.x = element_text(size=text_size),
+        guides()) 
+
+
+rec_fig3 <- 
+ggarrange(
+  ggarrange(chr_ends + theme(legend.position = "inside",
+                             legend.position.inside = c(0.7, 0.2),
+                             plot.margin = margin(20, 5, 5, 5)), 
+          rec_brp  + theme(legend.position = "inside",
+                             legend.position.inside = c(0.7, 0.23),
+                             plot.margin = margin(20, 5, 5, 5)),
+          labels = c("(a)", "(b)"),
+          font.label = list(size = 14, face = "italic")),
+  ggarrange(chr_rr_point + theme(plot.margin = margin(20, 5, 5, 5)), 
+          chr_rr_box + theme(plot.margin = margin(20, 5, 11, 5)), 
+          common.legend = T, legend = "top",
+          labels = c("(c)", "(d)"),
+          font.label = list(size = 14, face = "italic")),
+  nrow = 2,
+  heights = c(1,1)
+)
+```
+
+
+```{r plot_fig_3}
+
+
+enr_feat_legend <- get_legend(enr_feat_plot + theme(legend.position = "top",
+                                                    legend.title.position = "top",
+                                                    legend.direction = "vertical",
+                                                    legend.box.margin  = margin(0, 0, 0, 0),   # padding around the whole legend box
+                                                    legend.box.spacing = unit(0, "pt"),        # gap between legend and panel area
+))
+
+enrich_plot <- ggarrange(enr_feat_legend,
+                         enr_feat_plot + theme(legend.position = "none",
+                                               plot.margin = margin(0, 110, 8, 110)),
+                         enr_pop_plot + labs(caption = "* p < 0.05, ** p < 0.01, *** p < 0.001 (FDR-adjusted)") +
+                           theme(legend.position = "none",
+                                 plot.margin = margin(5, 110, 21, 110),
+                                 plot.caption = element_text(size = text_size, vjust = -4)),
+                         ncol = 1, 
+                         heights = c(0.6,2,1.4))
+
+
+  ggarrange(
+    ggarrange(rec_fig3, 
+              ggarrange(rec_comp_plot + theme(plot.margin = margin(5, 5, 10, 5)), 
+                        (brp_comp_plot + theme(plot.margin = margin(5, 5, 5, 5))), 
+                        nrow = 1, widths = c(1,1),
+                        align = "h",
+              labels = c("(e)","(f)"),
+              font.label = list(size = 14, face = "italic"),
+              common.legend = T, legend = "bottom"),
+              nrow = 2, heights = c(2,1)),
+    ggarrange(enrich_plot, 
+              labels = c("(g)"),
+              font.label = list(size = 14, face = "italic")),
+    align = "h",
+    widths = c(1.2,1))
+
+  ggsave(filename = paste("plots/fig_3_", Sys.Date(), ".pdf", sep = ""),
+         height = 10,
+         width = 18)  
+
+  ggsave(filename = paste("plots/fig_3_", Sys.Date(), ".png", sep = ""),
+         height = 10,
+         width = 18)  
+```
+
+
+
+```{r compartment_conservation_genomes}
+taxa1 = "Mechanitis polymnia"
+taxa2 = "Mechanitis lysimnia"
+
+my_labeller_comp2 <- labeller(
+  species = c(
+    ilMecPoly1   = "italic('Mechanitis polymnia')",
+    ilMecLysi212 = "italic('Mechanitis lysimnia')"
+  ),
+  .default = label_parsed
+)
+
+bin_data <- read.csv(paste("overlapping_compartments", REF, QUERY, Sys.Date(), "_table.csv", sep = ""))
+
+pol_df <- rec_vs_comp.df %>% 
+             filter(genome == "ilMecPoly1" & event_timing == "focal") %>% add_column(species = "ilMecPoly1") %>% dplyr::rename(chrom=chr) 
+
+lys_pol_ref_df <- rec_vs_comp.df %>% 
+             filter(genome == "ilMecPoly1" & event_timing == "anc_proxy") %>% add_column(species = "ilMecLysi212") %>% dplyr::rename(chrom=chr) %>% rbind(pol_df)
+
+lys_pol_ref_df$species <- factor(lys_pol_ref_df$species, levels = c("ilMecPoly1", "ilMecLysi212"))
+
+p <- ggplot(bin_data) +
+  geom_rect(
+    aes(xmin = x_start, xmax = x_end,
+        ymin = 0,        ymax = 1,
+        fill = comp_clean),
+    colour = NA, alpha = 0.7
+  ) +
+  geom_vline(data = lys_pol_ref_df,
+    aes(xintercept = (start + end)/2000000),
+        linewidth = 1, colour = "black") +
+  scale_fill_manual(
+    values   = c("red2", "royalblue", "#B0C4DE"),
+    #labels   = TRACK_LABELS,
+    name     = "Compartment",
+    na.value = "grey92"
+  ) +
+  scale_x_continuous(
+    #labels = function(x) paste0(x, " Mb"),
+    #expand = c(0.005, 0)
+  ) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(species ~ chrom, scales = "free_x", space = "free_x", switch = "both", labeller = my_labeller_comp2) +
+  labs(
+    # title    = paste("Compartment conservation:", REF, "vs", QUERY, sep = " "),
+    # subtitle = paste0(
+    #   "Compartments lifted via synteny blocks | bin size = ",
+    #   BIN_SIZE / 1000, " kb | grey = no data"
+    # ),
+    x =  bquote("Position in" ~ italic(.(taxa1)) ~ "genome (Mb)"),
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid      = element_blank(),
+    panel.border    = element_rect(colour = "grey40", fill = NA, linewidth = 0.5),
+    axis.text.y     = element_blank(),
+    axis.ticks.y    = element_blank(),
+    axis.text.x     = element_blank(),
+    axis.title.x     = element_text(size = text_size),
+    strip.text.x    = element_text(size = text_size),
+    strip.text.y    = element_text(size = text_size, angle = 0),
+    legend.position = "bottom",
+    legend.key.size = unit(0.5, "cm"),
+    legend.text     = element_text(size = 8),
+    #plot.title      = element_text(face = "bold", size = 13),
+    #plot.subtitle   = element_text(size = 9, colour = "grey40"),
+    plot.margin     = margin(10, 10, 10, 10)
+  )
+
+p
+ggarrange(
+  ggarrange(brp_comp_plot  + theme(legend.position = "none"),
+            rec_comp_plot  + theme(legend.position = "none"),
+            legend_comp, 
+            nrow = 1, labels = c("A", "B"), widths = c(1,1,0.3)),
+  p + theme(legend.position = "none", plot.margin = margin(t=20,r=1,b=1,l=20)), nrow = 2, labels = c("", "C"))
+
+ggsave(paste("plots/comp_comb_", Sys.Date(), ".png", sep = ""),
+       height = 12,
+       width = 16)
+
+
+```
+
+

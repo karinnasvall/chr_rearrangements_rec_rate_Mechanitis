@@ -1,0 +1,268 @@
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+
+
+#read combined dataframe including brp relative positions
+combined_df_brp <- read.csv("tables/combined_df_incl_brp_rel_pos2026-10-02.csv")[,-1] %>% select(-c(window_id))
+
+# read in chromosome type
+chr_status <- read.csv("tables/chr_status_2026-09-28.csv") %>% rename(chr_status = type)
+
+combined_df_brp <- combined_df_brp %>% left_join(chr_status)
+
+head(combined_df_brp)
+
+df <- combined_df_brp %>% filter(feature %in% c("dxy", "pi_Mpol", "pi_Mlys", "Fst")) %>% 
+filter(!chr %in% c("W", "W1", "Z", "Z1", "Z2")) %>%
+filter(event_timing %in% c("colinear", "end", "anc_proxy", "focal")) %>%
+filter(genome == "ilMecPoly1")
+
+head(df)
+unique(df$genome) 
+
+df_wide <- df %>% pivot_wider(names_from = feature, values_from = value)
+df_wide$pi_mean <- rowMeans(cbind(df_wide$pi_Mpol, df_wide$pi_Mlys), na.rm = TRUE)
+
+# simplify type (merge all breakpoints into a single category)
+df_wide$type_simple <- ifelse(df_wide$event_timing %in% c("focal", "anc_proxy"), "breakpoint", df_wide$event_timing)
+
+summary(df_wide)
+
+# exploring the data
+df_wide %>% 
+  ggplot(aes(x = pi_mean, y = dxy, color = chr_status)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(x = "Pi", y = "Dxy", color = "Chromosome Status")
+
+ggsave(paste("plots/dxy_vs_pi_plot", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+df_wide %>% 
+  ggplot(aes(x = pi_mean, y = dxy, color = event_timing)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(x = "Pi", y = "Dxy", color = "Region")
+
+ggsave(paste("plots/dxy_vs_pi_plot_by_breakpoint", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+
+df_wide %>% 
+  ggplot(aes(x = pi_mean, y = dxy, color = type)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE, aes(linetype = type, colour = type)) +
+    scale_colour_viridis_d(direction = -1) +
+    theme_minimal() +
+    labs(x = "Pi", y = "Dxy", color = "Breakpoint Type")
+
+ggsave(paste("plots/dxy_vs_pi_plot_by_brptype", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+ggplot(df, aes(x = value)) +
+    geom_histogram() +
+    facet_wrap(~feature, scales = "free") +
+    theme_minimal() +
+    labs(x = "Value", y = "Frequency")
+
+ggsave(paste("plots/histogram_pi_dxy_by_feature", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+df_wide %>% 
+  ggplot(aes(x = pi_mean, y = Fst, color = type_simple)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(x = "Pi", y = "Fst", color = "Region Type") +
+    scale_colour_manual(values = c("breakpoint" = "darkgreen", "colinear" = "tan4", "end" = "royalblue"))  
+
+ggsave(paste("plots/fst_vs_pi_plot_by_region_type", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+
+# Testing if the regression slopes differ between breakpoints and colinear regions
+library(lme4)
+library(lmerTest)
+library(emmeans)
+
+# centre the pi values
+df_wide$pi_c <- df_wide$pi_mean - mean(df_wide$pi_mean, na.rm = TRUE)
+
+# fit a linear model with the centred pi values and type_simple as predictors
+lm_test <- lm(dxy ~ pi_c * type_simple, data = df_wide)
+summary(lm_test)
+anova(lm_test)                                   # overall pi:type test and group test
+emtrends(lm_test, pairwise ~ type_simple, var = "pi_c", adjust = "holm")
+
+# Fit by ML (REML = FALSE) when comparing models with different fixed effects
+m0 <- lmer(dxy ~ pi_c + (1 | chr), data = df_wide, REML = FALSE)
+m1 <- lmer(dxy ~ pi_c + type_simple + (1 | chr), data = df_wide, REML = FALSE)
+m2 <- lmer(dxy ~ pi_c * type_simple + (1 | chr), data = df_wide, REML = FALSE)
+
+anova(m0, m1, m2)      # likelihood-ratio tests, AIC and BIC
+
+# Comapre only the models with and without the interaction term
+output_comp="tables/model_comparison"
+write(
+  capture.output(
+  print("Comparing models m1 and m2"),
+  anova(m1, m2)
+  ), file = paste(output_comp, Sys.Date(), ".txt", sep = ""))
+
+m_final <- lmer(dxy ~ pi_c * type_simple + (1 | chr), data = df_wide)   # REML by default
+
+write(capture.output(
+  print("Final model results"),
+  anova(m_final),    # F-tests for group, pi_mean and the interaction
+  summary(m_final)
+  ), file = paste(output_comp, Sys.Date(), ".txt", sep = ""), append = TRUE)
+
+write(capture.output(
+  print("Pairwise contrasts and slopes"),
+  emtrends(m_final, pairwise ~ type_simple, var = "pi_c", adjust = "holm"),                 # slopes
+  emmeans(m_final, pairwise ~ type_simple, at = list(pi_c = 0), adjust = "holm")           # intercepts
+  ), file = paste(output_comp, Sys.Date(), ".txt", sep = ""), append = TRUE)
+
+# refit model m1 with REML
+m1 <- lmer(dxy ~ pi_c + type_simple + (1 | chr), data = df_wide)
+write(capture.output(
+  print("Refitted model m1 with REML"),
+  anova(m1),    # F-tests for group, pi_c and the interaction
+  summary(m1)
+  ), file = paste(output_comp, Sys.Date(), ".txt", sep = ""), append = TRUE)
+
+
+
+mod <- m_final
+
+
+library(dplyr); library(ggplot2); library(ggpubr); library(emmeans)
+
+mp <- mean(df_wide$pi_mean, na.rm = TRUE)          # must match the centring used for mod
+cols <- c(breakpoint = "grey20", colinear = "tan3", end = "dodgerblue")
+
+# Interaction test
+an    <- anova(mod)
+p_int <- an["pi_c:type_simple", "Pr(>F)"]
+F_int <- an["pi_c:type_simple", "F value"]
+df2   <- an["pi_c:type_simple", "DenDF"]
+
+# Pairwise contrasts, Holm-adjusted
+fmt_p <- function(p) ifelse(p < 0.001, "p < 0.001", sprintf("p = %.3f", p))
+stars <- function(p) as.character(cut(p, c(0, 0.001, 0.01, 0.05, Inf),
+                                      labels = c("***", "**", "*", "ns"), right = FALSE))
+
+el <- as.data.frame(pairs(emmeans(mod, ~ type_simple, at = list(pi_c = 0)), adjust = "holm"))
+st <- as.data.frame(pairs(emtrends(mod, ~ type_simple, var = "pi_c"),      adjust = "holm"))
+
+ann <- paste0(
+  "Difference at mean \u03c0 (Holm)\n",
+  paste(sprintf("%s: %s, %s", el$contrast, fmt_p(el$p.value), stars(el$p.value)), collapse = "\n")
+)
+
+# Slope per group, with n of windows used in the model
+n_used <- df_wide %>% filter(!is.na(dxy), !is.na(pi_c)) %>% count(type_simple)
+
+sl <- as.data.frame(emtrends(mod, ~ type_simple, var = "pi_c")) %>%
+  mutate(type_simple = as.character(type_simple)) %>%
+  left_join(mutate(n_used, type_simple = as.character(type_simple)), by = "type_simple") %>%
+  mutate(lab = sprintf("%s (n = %d)\nslope = %.2f [%.2f, %.2f]",
+                       type_simple, n, pi_c.trend, lower.CL, upper.CL))
+
+col_lab <- setNames(cols[sl$type_simple], sl$lab)
+
+# Fitted lines, restricted to each group's observed range
+rng <- df_wide %>% group_by(type_simple) %>%
+  summarise(lo = min(pi_c, na.rm = TRUE), hi = max(pi_c, na.rm = TRUE)) %>%
+  mutate(type_simple = as.character(type_simple))
+
+rg <- ref_grid(mod, at = list(pi_c = seq(min(df_wide$pi_c, na.rm = TRUE),
+                                          max(df_wide$pi_c, na.rm = TRUE),
+                                          length.out = 100)))
+
+fit <- as.data.frame(emmeans(rg, ~ pi_c * type_simple)) %>%
+  mutate(type_simple = as.character(type_simple)) %>%
+  left_join(rng, by = "type_simple") %>%
+  filter(pi_c >= lo, pi_c <= hi) %>%
+  mutate(pi_mean  = pi_c + mp,
+         type_lab = factor(type_simple, levels = sl$type_simple, labels = sl$lab))
+
+df_plot <- df_wide %>%
+  filter(!is.na(dxy), !is.na(pi_mean)) %>%
+  mutate(type_lab = factor(type_simple, levels = sl$type_simple, labels = sl$lab))
+
+text_size=12
+
+ggplot() +
+  geom_point(data = df_plot, aes(pi_mean, dxy, colour = type_lab),
+             alpha = 0.25, size = 1) +
+  geom_ribbon(data = fit, aes(pi_mean, ymin = lower.CL, ymax = upper.CL, fill = type_lab),
+              alpha = 0.2) +
+  geom_line(data = fit, aes(pi_mean, emmean, colour = type_lab), linewidth = 1) +
+  geom_vline(xintercept = mp, linetype = "dotted", colour = "grey40") +
+  annotate("text", x = -Inf, y = Inf, label = ann,
+           hjust = -0.05, vjust = 1.1, size = text_size/2.8, lineheight = 1.05) +
+  scale_colour_manual(values = col_lab) +
+  scale_fill_manual(values = col_lab) +
+  labs(x = expression(pi), y = expression(D[XY]), colour = NULL, fill = NULL,
+       caption = sprintf(paste0(
+         "Linear mixed model with chromosome as random intercept. ",
+         "\u03c0 \u00d7 type interaction: F(2, %.0f) = %.2f, p = %.3f. ",
+         "Lines: fitted values with 95%% CI; dotted line: mean \u03c0. ",
+         "*** p < 0.001, ** p < 0.01, * p < 0.05, ns: not significant."),
+         df2, F_int, p_int)) +
+  theme_pubr() +
+  theme(legend.position = c(1, 0),
+    legend.justification = c("right", "bottom"),
+    legend.background = element_blank(),
+    axis.text = element_text(size = text_size),
+    axis.title = element_text(size = text_size),
+    legend.text = element_text(size = text_size)
+    )
+
+ggsave(paste("plots/dxy_vs_pi_plot_model_region_type", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+  
+
+
+
+
+df_wide %>% 
+  ggplot(aes(x = pi_mean, y = dxy, color = type_simple)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_pubr() +
+    labs(x = expression(pi), y = expression("D"["XY"]), color = "Genomic region") +
+    scale_colour_manual(values = c("breakpoint" = "grey20", "colinear" = "tan3", "end" = "dodgerblue"))  
+
+ggsave(paste("plots/dxy_vs_pi_plot_by_region_type", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+
+
+
+
+#########################
+# chromosomal status
+# plot average dxy vs pi per chromosome by chromosomal status
+df_wide %>% 
+  group_by(chr_status, chr) %>%
+  summarise(pi_mean = mean(pi_mean, na.rm = TRUE),
+            dxy = mean(dxy, na.rm = TRUE)) %>%
+  ggplot(aes(x = pi_mean, y = dxy, color = chr_status)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(x = "Pi", y = "Dxy", color = "Chromosomal Status") +
+    scale_colour_manual(values = c("colinear" = "tan4", "Rearranged" = "maroon1"))  
+
+ggsave(paste("plots/chr_average_dxy_vs_pi_plot_by_chr_status", Sys.Date(), ".png", sep = ""),
+    width = 8, height = 6)
+
+lm_test_chr <- lm(dxy ~ pi_mean * chr_status, data = df_wide)
+summary(lm_test_chr)
+anova(lm_test_chr)                                   # overall pi:type test and group test
+emtrends(lm_test_chr, pairwise ~ chr_status, var = "pi_mean", adjust = "holm")

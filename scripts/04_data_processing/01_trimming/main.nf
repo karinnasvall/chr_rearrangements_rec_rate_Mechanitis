@@ -6,19 +6,19 @@ params.output_dir = "/data/tol/teams/meier/lustre/users/kn9/recombination/pedigr
 
 workflow {
 
-    // ✔️ Detect *_R1.fq.gz files and extract sample IDs
+    // Detect *_R1.fq.gz files and extract sample IDs
     fastp_ch = Channel
     .fromFilePairs("${params.input_dir}/*_R{1,2}.fq.gz")
     .map { sample_id, reads -> tuple(sample_id, reads[0], reads[1]) }
 
-    // 🔁 Run the pipeline steps in order
+    // Run the pipeline steps in order
     qc_reports_raw   = fastqc_raw(fastp_ch)		   // Step 0: fastqc raw reads
     trimmed_fastqs   = process_fastp(fastp_ch)            // Step 1: fastp
     qc_reports       = fastqc(trimmed_fastqs)               // Step 2: fastqc
 }
 
 
-// 📊 FASTQC: Generate per-sample quality reports
+// FASTQC: Generate per-sample quality reports
 ///////////////////////////////////////////////////////////////////////////////////////////
 process fastqc_raw {
 
@@ -41,7 +41,7 @@ process fastqc_raw {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-// 🔬 FASTP: Quality trimming
+// FASTP: Trimming
 ///////////////////////////////////////////////////////////////////////////////////////////
 process process_fastp {
 
@@ -73,7 +73,7 @@ process process_fastp {
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-// 📊 FASTQC: Generate per-sample quality reports
+// FASTQC: Generate per-sample quality reports post-filter
 ///////////////////////////////////////////////////////////////////////////////////////////
 process fastqc {
 

@@ -1,0 +1,48 @@
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(matrixStats) 
+
+source("bin/combined_analyses_functions.R")
+# read in the data
+
+f_pol <- "../../pop_gen/ref_polymnia/popgen/output_filter_10000/polymnia_filtered_concat.vcf.out.csv.gz"
+f_lys <- "../../pop_gen/ref_lysimnia/popgen/output_filter_10000/lysimnia_filtered_concat.vcf.out.csv.gz"
+
+chr_status <- read_csv("tables/chr_status_2026-09-28.csv") %>% rename(chr_status = type)
+
+df <- read_csv(f_pol) %>% mutate(genome = "polymnia")
+df_lys <- read_csv(f_lys) %>% mutate(genome = "lysimnia")
+
+df <- df %>% rbind(df_lys) %>%
+  rename(pi_polymnia = pi_Mechanitis_polymnia,
+         pi_lysimnia = pi_Mechanitis_lysimnia,
+         dxy = dxy_Mechanitis_polymnia_Mechanitis_lysimnia,
+         fst = Fst_Mechanitis_polymnia_Mechanitis_lysimnia)
+
+df$chr <- clean_chr(df$scaffold)
+
+long <- df %>%
+  pivot_longer(c(pi_polymnia, pi_lysimnia, dxy, fst),
+               names_to = "stat", values_to = "value") %>%
+  filter(!is.na(value), !is.na(sites), sites > 0)
+
+summ <- function(d) d %>%
+  dplyr::summarise(n_windows = n(),
+            total_sites     = sum(sites),
+            total_value = sum(value*sites) / sum(sites),
+            mean      = mean(value),
+            median    = median(value),
+            sd      = sd(value),
+            .groups = "drop")
+
+per_chr <- long %>% group_by(genome, chr, stat) %>% summ()
+genome_wide  <- long %>% filter(!chr %in% c("Z", "Z1", "Z2", "W", "W1", "W2")) %>% group_by(genome, stat) %>% summ() %>% mutate(chr = "autosomes")
+
+results <- bind_rows(per_chr, genome_wide) %>% arrange(genome, chr, stat) %>%
+  dplyr::mutate(dplyr::across(c(total_value, mean, median, sd), ~ round(.x, 4)))
+
+# total value does not make sense for Fst, so we set it to NA
+results <- results %>% mutate(total_value = ifelse(stat %in% c("fst"), NA, total_value))
+
+write_csv(results, "tables/summary_pi_dxy_fst.csv", quote = "needed")

@@ -1,0 +1,14 @@
+input_vcf/SUPER_1.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_2.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_3.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_4.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_5.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_6.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_7.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_8.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_9.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_10.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_11.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_12.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_13.call.MQ_BQ20_filtered_DP330_5000.vcf.gz
+input_vcf/SUPER_14.call.MQ_BQ20_filtered_DP330_5000.vcf.gz

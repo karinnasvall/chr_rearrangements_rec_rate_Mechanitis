@@ -1,0 +1,27 @@
+#!/bin/bash -l
+
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 5000
+#BSUB -R "select[mem>5000] rusage[mem=5000] span[hosts=1]"
+#BSUB -J lm3_filt2
+#BSUB -e log/lm3_filt2.%J.%I.error
+#BSUB -o log/lm3_filt2.%J.%I.out
+
+
+BASE_DIR="/data/tol/teams/meier/lustre/users/kn9/recombination/pedigree/lepmap/lysimnia_filt_20pct"
+LM3="/software/team347/kn9/lep-map3-code/bin"
+INPUT_DATA="${BASE_DIR}/01_parentcall2/data.lepmap3.gz"
+
+OUTPUT_PATH=$BASE_DIR/02_filtering2
+mkdir -p $OUTPUT_PATH
+
+
+zcat $INPUT_DATA |java -cp $LM3 Filtering2 \
+ data=- \
+ removeNonInformative=1 \
+ dataTolerance=0.1 \
+ missingLimit=0 \
+ | gzip > $OUTPUT_PATH/data.filt.lepmap3.gz  2> $OUTPUT_PATH/data.filt.log
+
+

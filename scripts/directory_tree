@@ -1,0 +1,162 @@
+.
+├── 01_genome_annotation
+│   ├── get_windowbased_content_run.bsub
+│   ├── get_windowbased_content.sh
+│   ├── helixer.bsub
+│   ├── merge_hap_index.bsub
+│   ├── pantera_ml.bsub
+│   ├── pggb.bsub
+│   ├── README.md
+│   ├── repeatmasker_to_bed.py
+│   ├── repeat_occupancy_calculator_plot.py
+│   └── summarise_repeat_per_chr.sh
+├── 02_rearrangements
+│   ├── analysis_steps.txt
+│   ├── ancestral_reconstruction
+│   │   ├── bin
+│   │   │   ├── correct_breakpoints.R
+│   │   │   ├── detect_breakpoints_agora.py
+│   │   │   ├── parse_fasta_headers.py
+│   │   │   ├── plot_breakpoints_agora.py
+│   │   │   ├── plot_tree.py
+│   │   │   ├── prep_syngraph_input.py
+│   │   │   ├── refine_breakpoints.py
+│   │   │   ├── run_breakpoint_analysis.sh
+│   │   │   ├── run_syntenyplotter_busco_agora.R
+│   │   │   ├── syngraph_functions.R
+│   │   │   ├── syntenyplotter_agora_multiplot.R
+│   │   │   ├── syntenyplotter_agora.R
+│   │   │   ├── syntenyplotter_function_busco.R
+│   │   │   └── tree_pruning.R
+│   │   ├── list_Mec_genomes.txt
+│   │   ├── main.nf
+│   │   ├── nextflow.config
+│   │   ├── run_nf.bsub
+│   │   ├── syngraph_agora_results.Rmd
+│   │   ├── tree_pnas_mech_nucl.txt
+│   │   └── tree_pnas_pruned.txt
+│   ├── cactus_breakpoint_nf
+│   │   ├── bin
+│   │   │   ├── detect_ancestral_breakpoints.py
+│   │   │   ├── halsynteny.bsub
+│   │   │   ├── identify_conserved_blocks.py
+│   │   │   └── plot_results.py
+│   │   ├── main.nf
+│   │   ├── nextflow.config
+│   │   └── run_nf.bsub
+│   ├── cactus.bsub
+│   ├── minimap
+│   │   ├── intermediate
+│   │   │   ├── chain_ilMecLysi212ilMecLysi317.txt
+│   │   │   ├── chain_ilMecLysi317ilMecLysi212.txt
+│   │   │   ├── chr_length_ilMecLysi212ilMecLysi317.txt
+│   │   │   └── chr_length_ilMecLysi317ilMecLysi212.txt
+│   │   ├── minimap_genus_pairwise.bsub
+│   │   └── syntenyplotteR_paf_mod.R
+│   ├── odp
+│   │   ├── lists
+│   │   │   ├── list_all_genomes_ordered.txt
+│   │   │   ├── list_anc_colour_rainbow.txt
+│   │   │   ├── list_configs_flipped.txt
+│   │   │   ├── list_configs.txt
+│   │   │   ├── list_tolid.txt
+│   │   │   └── outgroup_elements_db12.tsv
+│   │   └── scripts
+│   │       ├── flip_chr.bsub
+│   │       ├── odp_array.bsub
+│   │       ├── odp_config_multiple_flipped.sh
+│   │       ├── odp_config_multiple.sh
+│   │       ├── odp_prep_input.txt
+│   │       └── odp_ribbon_plot.bsub
+│   └── README.md
+├── 03_chromatin
+├── 04_data_processing
+│   ├── 01_trimming
+│   │   ├── main.nf
+│   │   ├── nextflow.bsub
+│   │   └── nextflow.config
+│   ├── 02_mapping
+│   │   ├── main_mapping.nf
+│   │   ├── mosdepth_depth.bsub
+│   │   ├── nextflow.config
+│   │   ├── nextflow_mapping_DNA.sh
+│   │   └── plot_coverage_all_samples.py
+│   ├── 03_variant_calling
+│   │   ├── nextflow_calling_variants.sh
+│   │   ├── nextflow.config
+│   │   ├── variant_calling.nf
+│   │   └── vcf_thin.sh
+│   └── 04_filter_pop_data
+│       ├── bcftools_filter_allsites.bsub
+│       ├── bcftools_filter_allsites_polymnia.bsub
+│       ├── bcftools_filter.bsub
+│       ├── bcftools_stats_sum.sh
+│       └── vcfR_qc.Rmd
+├── 05_pedigree_recombination
+│   ├── 01_concatenate_pileup2lik.bsub
+│   ├── 01_pileup2lik_from_nextflow_bams.bsub
+│   ├── ibd.bsub
+│   ├── README.md
+│   ├── scripts_lysimnia
+│   │   ├── 01_ParentCall2.bsub
+│   │   ├── 02_Filtering2.bsub
+│   │   ├── 03_Separate_chromosomes2.bsub
+│   │   ├── 05_order_eval_likelihood.sh
+│   │   ├── 05_order_mask13.bsub
+│   │   ├── 06_fitstepfunction.bsub
+│   │   ├── compare_pop_ped_rec_rate.R
+│   │   ├── lepmap_plot_map_fitted.R
+│   │   ├── lepmap_plot_order.R
+│   │   ├── pedigree.txt
+│   │   ├── plot_marey_rec_rate_cobs_smoothing.R
+│   │   └── summarize_rec_events.R
+│   └── scripts_polymnia
+│       ├── 02_parentcall2.bsub
+│       ├── 03_Separate_chromosomes2.bsub
+│       ├── 05_order_default_orderMAsk13_nomappingf.bsub
+│       ├── 05_order_eval_likelihood.sh
+│       ├── 05_order_mask13_nomapf.bsub
+│       ├── 06_fitstepfunction.bsub
+│       ├── create_lod_summary.sh
+│       ├── lepmap_plot_map_fitted.R
+│       ├── lepmap_plot_order.R
+│       ├── map_physical_pos_to_ordered_maps.sh
+│       ├── plot_marey_rec_rate_cobs_smoothing.R
+│       └── plot_sep_chr.R
+├── 06_population_recombination
+│   ├── 01a_bcftools_filter.bsub
+│   ├── 01b_smc_pipeline.bsub
+│   ├── 02_pyrho_make_table.bsub
+│   ├── 03_pyrho_hyperparam.bsub
+│   └── 04_pyrho_optimize.bsub
+├── 07_recombination_models
+│   └── model_rec_rate.Rmd
+├── 08_pop_gen
+│   ├── admixture
+│   │   ├── bin
+│   │   │   ├── admixture_K.sh
+│   │   │   ├── bcftools_filter.sh
+│   │   │   └── plot_admixure_pca.R
+│   │   ├── lists
+│   │   │   ├── list_sorted_vcfs.txt
+│   │   │   ├── list_vcfs.txt
+│   │   │   └── samples.txt
+│   │   ├── metadata.tsv
+│   │   └── README.md
+│   └── popgen
+│       ├── 01_bcftolls_filter.bsub
+│       ├── 02_pop_gen_ref_lysimnia.bsub
+│       ├── 02_pop_gen_ref_polymnia.bsub
+│       ├── average_dxy_fst_pi.Rmd
+│       └── dxy_vs_pi.Rmd
+├── 09_combined_analysis
+│   ├── bin
+│   │   ├── combined_analyses_functions.R
+│   │   ├── genomic_enrichment_test_v7.R
+│   │   └── genomic_enrichment_test_v8.R
+│   ├── data_preparation_summary.Rmd
+│   ├── Figure_2_genome_tracks.R
+│   └── figure_3_combined_plot_261007.Rmd
+└── directory_tree
+
+29 directories, 130 files

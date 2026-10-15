@@ -1,0 +1,68 @@
+#!/bin/bash
+#BSUB -J pileup2lik[1-15]
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 4000
+#BSUB -R "select[mem>4000] rusage[mem=4000] span[hosts=1]"
+#BSUB -o /data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia/logs/7.1_pileup2lik/pileup2lik_%J_%I.out
+#BSUB -e /data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia/logs/7.1_pileup2lik/pileup2lik_%J_%I.err
+
+set -euo pipefail
+
+# Pileup2Likelihoods: compute genotype likelihoods (not hard calls) from BAMs.
+# Uses Karin's filtered BAMs from the nextflow pipeline (bam_dedup/).
+# Array job: one task per chromosome (15 total, SUPER_1-14 + SUPER_Z, no W).
+
+BASE_DIR="/data/tol/teams/meier/lustre/users/fv3/pedigree_polymnia"
+NEXTFLOW_BAMS="/data/tol/teams/meier/lustre/projects/ithomiini/mechanitis/recombination_mutation/pedigree/01_rawdata_to_vcf/02_mapping_polymnia/bam_dedup"
+
+CONTIGS_FILE="${BASE_DIR}/file_lists/polymnia_contigs_SUPER_noW.txt"
+BAM_LIST="${BASE_DIR}/file_lists/nextflow_bams.list"
+MAPPING_FILE="${BASE_DIR}/file_lists/mapping.txt"
+
+# Use masked reference from nextflow pipeline work dir
+REF_GENOME="/data/tol/teams/meier/lustre/projects/ithomiini/mechanitis/recombination_mutation/pedigree/01_rawdata_to_vcf/03_variant_call_polymnia/nf_dir/work/d6/b0d3adbddce029e995011efe84e4e2/ilMecPoly1_1.renamed.masked.fa.gz"
+
+OUT_ROOT="${BASE_DIR}/7.1_pileup2lik_nextflow"
+LOG_DIR="${BASE_DIR}/logs/7.1_pileup2lik"
+mkdir -p "${OUT_ROOT}" "${LOG_DIR}"
+
+module load conda
+conda activate /software/treeoflife/conda/users/envs/team347/kn9/lepwrap
+module load samtools/1.20--h50ea8bc_0
+
+CONTIG="$(sed -n "${LSB_JOBINDEX}p" "${CONTIGS_FILE}")"
+echo "Processing contig: ${CONTIG}"
+
+# Match nextflow pipeline quality thresholds from BCF header (MQ=20, BQ=20)
+MAPQ=20
+BASEQ=20
+
+# Coverage thresholds: Z uses lower minimum because females are hemizygous (ZW system),
+# so female Z coverage is ~half of autosomal coverage.
+if [[ "${CONTIG}" == "SUPER_Z" ]]; then
+  MIN_COVERAGE=6
+else
+  MIN_COVERAGE=10
+fi
+
+POST_OUT="${OUT_ROOT}/${CONTIG}.post.gz"
+
+echo "Running samtools mpileup | Pileup2Likelihoods for ${CONTIG}"
+
+samtools mpileup \
+  -q "${MAPQ}" \
+  -Q "${BASEQ}" \
+  -r "${CONTIG}" \
+  -s \
+  -b "${BAM_LIST}" \
+  -f "${REF_GENOME}" \
+| java -cp /software/treeoflife/conda/users/envs/team347/kn9/lepwrap/bin/lepmap3/ Pileup2Likelihoods \
+    minCoverage="${MIN_COVERAGE}" \
+    numLowerCoverage=0.3 \
+    mappingFile="${MAPPING_FILE}" \
+    callIndels=0 \
+| gzip > "${POST_OUT}"
+
+echo "Wrote ${POST_OUT}"
+conda deactivate

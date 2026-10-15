@@ -1,0 +1,28 @@
+#!/bin/bash -l
+
+#BSUB -q normal
+#BSUB -n 2
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -J lm3_pc2
+#BSUB -e log/lm3_pc2.%J.%I.error
+#BSUB -o log/lm3_pc2.%J.%I.out
+
+
+BASE_DIR="/data/tol/teams/meier/lustre/users/kn9/recombination/pedigree/lepmap/lysimnia_filt_20pct"
+LM3="/software/team347/kn9/lep-map3-code/bin"
+PEDIGREE="${BASE_DIR}/pedigree_filtered_3ind.txt"
+INPUT_DATA=/lustre/scratch125/tol/teams/meier/users/ag39/lepmap_lysimnia/gen_likelihoods/all_post.gz
+
+OUTPUT_PATH=$BASE_DIR/01_parentcall2
+mkdir -p $OUTPUT_PATH
+
+
+# filter individuals and small scaffolds and subset, remove ind CAM073484 (column 65 in post file, 75 in pedigree and data-file)
+zcat $INPUT_DATA| grep -v "SCAFFOLD" | cut -f-7,9-64,66,68- |awk 'NR<=1 || /^#/ || rand()<0.2' | java -cp $LM3 ParentCall2 \
+ data=$PEDIGREE \
+ posteriorFile=- \
+ removeNonInformative=1 \
+ ZLimit=2 \
+ | gzip > $OUTPUT_PATH/data.lepmap3.gz  2> $OUTPUT_PATH/data.log
+

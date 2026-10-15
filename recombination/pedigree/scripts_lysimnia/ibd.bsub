@@ -1,0 +1,26 @@
+#!/bin/bash -l
+
+#BSUB -q normal
+#BSUB -n 8
+#BSUB -M 10000
+#BSUB -R "select[mem>10000] rusage[mem=10000] span[hosts=1]"
+#BSUB -J lm_ibd
+#BSUB -e log/lm_ibd.%J.%I.error
+#BSUB -o log/lm_ibd.%J.%I.out
+
+
+BASE_DIR="/data/tol/teams/meier/lustre/users/kn9/recombination/pedigree/lepmap/lysimnia"
+LM3="/software/team347/kn9/lep-map3-code/bin"
+
+INPUT_DATA=/lustre/scratch125/tol/teams/meier/users/ag39/lepmap_lysimnia/gen_likelihoods/all_post.gz
+
+OUTPUT_PATH=$BASE_DIR/ibd
+mkdir $OUTPUT_PATH
+
+zcat $INPUT_DATA| grep -v "HAP1_SCAFFOLD" | awk 'NR<=1 || /^#/ || rand()<0.001'| \
+java -cp $LM3 IBD \
+ posteriorFile=-\
+ numThreads=8 \
+ > $OUTPUT_PATH/ibd.txt  2> $OUTPUT_PATH/ibd.log
+
+
