@@ -3,11 +3,12 @@ library(ggplot2)
 library(cobs)
 library(dplyr)
 library(ggtext)
+library(ggpubr)
 
 args <- commandArgs(trailingOnly = TRUE)
 
-mapdirectory="fitted_maps_for_rec_rate/"
-prefix="M_polymnia"
+mapdirectory="06_fitted_mask13/"
+prefix="M_lysimnia"
 
 mapdirectory <- args[1]
 # or a file with a list of files to read in, one per line
@@ -26,10 +27,10 @@ print(paste("Using prefix for plots and tables:", prefix))
 
 print(files)
 
-# readin the files and combine to one df give the number in the filename as a column, 
+# readin the files and combine to one df, 
 # keep only the first 4 columns and rename them to marker, position, genetic_position_male, genetic_position_female and add LG column with the number in the filename
 maps <- lapply(files, function(file) {
-  map <- read.table(file, header = TRUE, stringsAsFactors = FALSE, skip = 3)
+  map <- read.table(file, header = FALSE, stringsAsFactors = FALSE, skip = 1)
   map <- map[, 1:4]
   colnames(map) <- c("chrom", "position", "genetic_position_male", "genetic_position_female")
   map$position <- as.numeric(gsub("\\*", "", map$position))
@@ -70,7 +71,7 @@ plot_title=prefix
 
 
 # print information about the maps df
-sink(file = paste("tables/test_summary_map_", prefix, Sys.Date(), ".txt", sep = ""))
+sink(file = paste("tables/summary_map_", prefix, Sys.Date(), ".txt", sep = ""))
 
 print(paste("Result for:", plot_title))
 
@@ -84,7 +85,17 @@ print("Map length per chr min and max")
 aggregate(maps$genetic_position_male, list(maps$chrom), max)
 paste("Total map length (cM): ",sum(aggregate(maps$genetic_position_male, list(maps$chrom), max)$x))
 
-paste("Appr recombination rate (cM/Mb):", sum(aggregate(maps$genetic_position_male, list(maps$chrom), max)$x)/sum(aggregate(maps$phys_length, list(maps$chrom), max)$x)*1000000)
+rec_rate_overall <- sum(aggregate(maps$genetic_position_male, list(maps$chrom), max)$x)/sum(aggregate(maps$phys_length, list(maps$chrom), max)$x)*1000000
+
+maps_auto <- maps %>% filter(!chrom %in% c("Z", "Z1", "Z2", "W", "W1", "W2"))
+
+paste("Total map length autosomes (cM): ",sum(aggregate(maps_auto$genetic_position_male, list(maps_auto$chrom), max)$x))
+
+rec_rate_overall_auto <- sum(aggregate(maps_auto$genetic_position_male, list(maps_auto$chrom), max)$x)/sum(aggregate(maps_auto$phys_length, list(maps_auto$chrom), max)$x)*1000000
+
+paste("Appr recombination rate (cM/Mb):", rec_rate_overall)
+paste("Appr autosomal recombination rate (cM/Mb):", rec_rate_overall_auto)
+
 sink()
 
 # print as table
@@ -115,17 +126,17 @@ my_theme <- theme(plot.title = element_markdown(),
 ggplot(map.df, aes(x=position/1000000, y=genetic_position_male)) +
   geom_point(colour = "grey40", alpha=0.5, size = 1) +
   facet_wrap(~chrom) + 
-  labs(title = paste("Marey map <i>M. polymnia<i>"),
+  labs(title = paste("Marey map <i>M. lysimnia<i>"),
        y = "Genetic position (cM)",
        x = "Physical position (Mb)") +
   my_theme
   
-ggsave("plots_ms/marey_map_polymnia.pdf",
+ggsave(paste("plots/marey_map_", prefix, ".pdf", sep = ""),
        width = 14,
        height = 10)
 
 
-map.df %>% filter(is.na(position))
+maps <- map.df %>% filter(!is.na(position) & !chrom %in% c("Z1", "Z2"))
 
 #map with cobs
 
@@ -137,23 +148,23 @@ for(i in unique(maps$chrom)){
 
   print(i)
 
-  if (i == "14"){
+  if (i == "04"){
     fit = cobs(map_chr$position, map_chr$genetic_position_male,
                method="uniform",
-               constraint= "increase", 
-               lambda=0.5, 
+               constraint= "increase",
+               lambda=0.5,
                degree=1, # for L1 roughness
-               knots=seq(min(map_chr$position),max(map_chr$position),length.out=10), # desired nr of knots 
-               tau=0.5) # to predict median   
+               knots=seq(min(map_chr$position),max(map_chr$position),length.out=5), # desired nr of knots
+               tau=0.5) # to predict median
   }else{
 fit = cobs(map_chr$position, map_chr$genetic_position_male,
            method="uniform",
            constraint= "increase", 
            lambda=0.5, 
            degree=1, # for L1 roughness
-          #knots=seq(min(map_chr$position),max(map_chr$position),length.out=30), # desired nr of knots 
+           knots=seq(min(map_chr$position),max(map_chr$position),length.out=30), # desired nr of knots 
            tau=0.5) # to predict median
-}
+ }
 
 X = predict(fit,interval="none",z=map_chr$position)[,1]
 predY = predict(fit,interval="none",z=map_chr$position)[,2]
@@ -184,7 +195,7 @@ ggplot(smooth_map, aes(x=X/1000000, y=Y2))+
   my_theme
 
 
-ggsave(paste("plots_ms/smoothed_map_", prefix, ".pdf", sep = ""),
+ggsave(paste("plots/smoothed_map_", prefix, ".pdf", sep = ""),
        width = 14,
        height = 10 )
 
@@ -197,13 +208,13 @@ for (chr in unique(maps$chrom)){
   
   map_chr <- maps[maps$chrom == chr, ]
   
-  if (chr == "14"){
+  if (chr == "04"){
     fit = cobs(map_chr$position, map_chr$genetic_position_male,
                method="uniform",
                constraint= "increase", 
                lambda=0.5, 
                degree=1, # for L1 roughness
-               knots=seq(min(map_chr$position),max(map_chr$position),length.out=10), # desired nr of knots 
+               knots=seq(min(map_chr$position),max(map_chr$position),length.out=5), # desired nr of knots
                tau=0.5) # to predict median   
   }else{
     fit = cobs(map_chr$position, map_chr$genetic_position_male,
@@ -211,7 +222,7 @@ for (chr in unique(maps$chrom)){
                constraint= "increase", 
                lambda=0.5, 
                degree=1, # for L1 roughness
-               #knots=seq(min(map_chr$position),max(map_chr$position),length.out=30), # desired nr of knots 
+               knots=seq(min(map_chr$position),max(map_chr$position),length.out=30), # desired nr of knots 
                tau=0.5) # to predict median
   }
   
@@ -226,22 +237,50 @@ deriv_df <- data.frame(
 maps_deriv <- rbind(maps_deriv, deriv_df)
 }
 
-ggplot(maps_deriv, aes(x=pos_bp/1e6, y=rate*1e6)) +
-  geom_point(colour = "grey", alpha=0.7, size = 1) +
-  geom_smooth(span = 0.2, se = F, colour = "royalblue", linewidth = 1) +
-  facet_wrap(~chrom) +
-  scale_y_continuous(limits = c(0,max(maps_deriv$rate*1e6, na.rm = T))) +
-  labs(title = paste("Recombiation rate in <i>M. polymnia<i>"), x = "Position (Mb)", y = "Recombination rate (cM/Mb)") +
-  my_theme
 
-ggsave(paste0("plots_ms/Recombination_rate_", prefix, ".pdf"), 
-       width=14, 
-       height=10)
+# chr 4
 
+maps_04 <- maps[maps$chrom == "04", ]
+# 1. Identify the boundaries of your gap (e.g., between 40 Mb and 70 Mb)
+# 2. Generate dense knots for the left arm, and dense knots for the right arm
+knots_left  <- seq(from = min(maps_04$position), to = 10000000, by = 1000000)   # Every 1 Mb
+knots_right <- seq(from = 15000000, to = max(maps_04$position), by = 1000000)   # Every 1 Mb
 
+# 3. Combine them (Notice no knots are placed between 40 and 70 Mb)
+my_custom_knots <- c(knots_left, knots_right, max(maps_04$position))
+
+# 4. Fit cobs using your custom knot grid
+  fit <- cobs(x = maps_04$position, y = maps_04$genetic_position_male, 
+            constraint = "increase",    # Crucial for Marey maps to prevent negative rates
+            knots = my_custom_knots, 
+            nknots = length(my_custom_knots))
+
+  x_grid <- seq(min(maps_04$position), max(maps_04$position),100000)
+  deriv_pred <- predict(fit, x_grid, deriv = 1)
+  
+  deriv_df <- data.frame(
+    chrom = "04",
+    pos_bp = deriv_pred[, 1],
+    rate   = deriv_pred[, 2]   # cM per bp
+  )
+  maps_deriv <- rbind(maps_deriv %>% filter(chrom != "04"), deriv_df)
+
+  
+  ggplot(maps_deriv, aes(x=pos_bp/1e6, y=rate*1e6)) +
+    geom_point(colour = "grey", alpha=0.7, size = 1) +
+    geom_smooth(span = 0.2, se = F, colour = "royalblue", linewidth = 1) +
+    facet_wrap(~chrom) +
+    scale_y_continuous(limits = c(0,max(maps_deriv$rate*1e6, na.rm = T))) +
+    labs(title = paste("Recombination rate in <i>M. lysimnia<i>"), x = "Position (Mb)", y = "Recombination rate (cM/Mb)") +
+    my_theme
+  
+  ggsave(paste0("plots/Recombination_rate_", prefix, ".pdf"), 
+         width=14, 
+         height=10)
+  
 ####### rec rate vs chr length
 
-fai_dir <- "../../rawdata_to_vcf/03_variant_call_polymnia_rptmask/ref/"
+fai_dir <- "../../../rawdata_to_vcf/03_variant_call_lysimnia_rptmask/ref/"
 ### get chr lengths
 print(paste("Reading .fai from directory:", fai_dir))
 files <- list.files(fai_dir, pattern = paste0(".*\\.fai$"), full.names = TRUE)  
@@ -252,16 +291,11 @@ chr_lengths <- lapply(files, function(file) {
   df
 }) %>% bind_rows()
 
-# clean chromosme names to be just the number and zeropadded if needed
+# clean chromosome names to be just the number and zeropadded if needed
 chr_lengths$chrom <- clean_chr(chr_lengths$chrom)
 chr_lengths$chrom <- factor(chr_lengths$chrom)
 
-# add chromosome length for chr 2A and 2B, that do not exist in the fai files
 
-chr_lengths <- chr_lengths %>%
-  add_row(chrom = "02A", length = 13051474) %>%
-  add_row(chrom = "02B", length = chr_lengths[chr_lengths$chrom=="02", "length"] - 13051474) %>%
-  filter(chrom != "02")
 
 # add to df
 summary_maps <-  summary_maps %>% left_join(., chr_lengths, by = "chrom")
@@ -285,15 +319,16 @@ ggplot(summary_maps, aes(x = length/1000000, y = rec_rate)) +
   geom_line(aes(x = length/1000000, y = (50/length)*1000000), linetype = "dotted", linewidth = 1, color = "tan1") +
   geom_line(aes(x = length/1000000, y = (100/length)*1000000), linetype = "dotted", linewidth = 1, color = "tan4") +
   geom_text(aes(label = chrom), size = 4) +
+  stat_cor(method = "spearman", cor.coef.name = "Rho") +
   annotate("text", x = 20, y = Inf, hjust = -0.0, vjust = 2, label = eq_txt, size = text_size/2.8 ) +
   annotate("text", x = 20, y = Inf, hjust = -0.0, vjust = 4, label = p_txt, size = text_size/2.8) +
-  labs(title = paste("Recombination rate vs chromosome length, pedigree <i>M. polymnia<i>"),
+  labs(title = paste("Recombination rate vs chromosome length, pedigree <i>M. lysimnia<i>"),
        x = "Chromosome length (Mb)",
        y = "Recombination rate (cM/Mb)") +
   scale_y_continuous(limits = c(1, 7)) +
   my_theme
 
-ggsave(paste0("plots_ms/rec_rate_vs_chrom_length_", Sys.Date(), ".pdf"), width = 8, height = 6)
+ggsave(paste0("plots/rec_rate_vs_chrom_length_lysimnia_", Sys.Date(), ".pdf"), width = 8, height = 6)
 
 
 ##### get 100kb window
@@ -302,7 +337,7 @@ ggsave(paste0("plots_ms/rec_rate_vs_chrom_length_", Sys.Date(), ".pdf"), width =
 all_windows <- chr_lengths %>%
   rowwise() %>%
   mutate(start = list(seq(0, length, by = 100000))) %>%
-  unnest(start) %>%
+  tidyr::unnest(start) %>%
   mutate(end = pmin(start + 100000, length)) %>%
   ungroup() %>%
   select(chrom, start, end) %>% filter(chrom != "W")
@@ -324,51 +359,57 @@ ggplot(maps_100kb_full, aes(x = start, y = rate)) +
   geom_point(colour= "grey80", alpha = 0.5) +
   facet_wrap(~chrom)
 
-write.csv(maps_100kb_full, file = "tables/rec_rate_pedigree_polymnia_100kb.csv", row.names = F, quote = F)
+write.csv(maps_100kb_full, file = paste("tables/rec_rate_pedigree_", prefix, "_100kb.csv", sep = ""), row.names = F, quote = F)
 
 ##########
 #compare with population data
 
-COMBINED="../../combined_analysis/tables/combined_df_all_features_2026-05-26.csv"
+COMBINED="../../../../combined_analysis/tables/combined_df_all_features_2026-05-26.csv"
 
-rec_df <- read.csv(COMBINED) %>% filter(feature == "Recombination_rate" & genome=="ilMecPoly1") 
+rec_df <- read.csv(COMBINED) %>% filter(feature == "Recombination_rate") 
+rec_rate_overall_pol <- 3.3763
+rec_rate_mean_pop_pol <- 
 
 rec_df <- rec_df %>%
-  mutate(chr=case_when(chr == "02" & start < 13051474 ~ "02A",
-                       chr == "02" & start > 13051474 ~ "02B",
-                       TRUE ~ chr)) %>% filter(!chr %in% c("02", "W", "Z"))
+  mutate(chr=case_when(chr == "02"  & genome=="ilMecPoly1" & start < 13051474 ~ "02A",
+                       chr == "02"  & genome=="ilMecPoly1" & start > 13051474 ~ "02B",
+                       TRUE ~ chr)) %>% filter(!chr %in% c("W", "Z", "Z1", "Z2")) %>%
+  mutate(value_sc <- case_when(genome == "ilMecPoly1" ~ rec_rate_overall_pol,
+                   genome == "ilMecLysi212" ~ rec_rate_overall))
 
 
-chr_status <- read.csv(file = paste("tables/chr_status_2026-06-03.csv"))
+table(rec_df$chr, rec_df$genome)
+
+chr_status <- read.csv(file = paste("../../polymnia/tables/chr_status_2026-06-03.csv"))
 
 
-left_join(maps_100kb_full %>% filter(chrom != "Z"), rec_df %>% filter(chr != "Z"), by = c("chrom"="chr", "start"="start")) %>%
+left_join(maps_100kb_full %>% filter(!chrom %in% c("Z", "Z1", "Z2")), rec_df %>% filter(genome == "ilMecLysi212" & !chr %in% c("Z", "Z1", "Z2")), by = c("chrom"="chr", "start"="start")) %>%
   ggplot(aes(value, rate*1000000)) +
   geom_point(colour = "grey30", alpha = 0.7) +
   geom_smooth(method ="lm", ) +
   stat_cor(method = "spearman") +
   facet_wrap(~chrom) +
-  labs(title = "Population vs pedigree <i>M. polymnia<i>",
+  labs(title = "Population vs pedigree <i>M. lysimnia<i>",
        x = "Population recombination rate",
        y = "Pedigree recombination rate") +
   my_theme
 
-ggsave(filename = paste("plots_ms/corr_pop_ped_per_chr", Sys.Date(), ".pdf", sep = ""),
+ggsave(filename = paste("plots/corr_pop_ped_per_chr", Sys.Date(), ".pdf", sep = ""),
        height = 12,
        width = 16)
 
-left_join(maps_100kb_full %>% filter(chrom != "Z"), rec_df, by = c("chrom"="chr", "start"="start")) %>%
+left_join(maps_100kb_full %>% filter(chrom != "Z"), rec_df %>% filter(genome == "ilMecLysi212" & !chr %in% c("Z", "Z1", "Z2")), by = c("chrom"="chr", "start"="start")) %>%
   ggplot(aes(value, rate*1000000)) +
   geom_point(colour = "grey30", alpha = 0.7) +
   geom_smooth(method ="lm", ) +
   stat_cor(method = "spearman") +
   #facet_wrap(~chrom) +
-  labs(title = "Population vs pedigree <i>M. polymnia<i>",
+  labs(title = "Population vs pedigree <i>M. lysimnnia<i>",
        x = "Population recombination rate",
        y = "Pedigree recombination rate") +
   my_theme
 
-ggsave(filename = paste("plots_ms/corr_pop_ped_", Sys.Date(), ".pdf", sep = ""),
+ggsave(filename = paste("plots/corr_pop_ped_", Sys.Date(), ".pdf", sep = ""),
        height = 12,
        width = 16)
 
@@ -385,14 +426,16 @@ rec_df %>% select(genome, chr, start, value) %>% left_join(., chr_status) %>%
   #facet_wrap(~chrom) +
   scale_fill_manual(name = "",
                     values = c("#2166AC", "white", "white"),
-                    labels = c("Colinear", "Rearranged", "NA")) +
-  labs(title = "Population vs pedigree <i>M. polymnia<i>",
+                    labels = c("Collinear", "Rearranged", "NA")) +
+  labs(title = "Population vs pedigree <i>M. lysimnia<i>",
        x = "Population recombination rate",
        y = "Pedigree recombination rate") +
   my_theme  
 
 
-ggsave(paste("plots_ms/pop_vs_ped_chr_mean_", Sys.Date(), ".pdf", sep = ""),
+ggsave(paste("plots/pop_vs_ped_chr_mean_", Sys.Date(), ".pdf", sep = ""),
        height = 6,
        width = 8)
+
+
 

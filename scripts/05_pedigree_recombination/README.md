@@ -18,15 +18,16 @@ Numbers in file names give the run order. Step 04 Join Singles was not performed
 | 01 | `01_*` | `Pileup2Likelihoods` (Genotype likelihoods from deduplicated bam-files) |
 | 02 | `02_parentcall2.bsub`,  `02_Filtering2.bsub` | `ParentCall2` / `Filtering2` (Infer parental haplotypes) |
 | 03 | `03_Separate_chromosomes2.bsub` | `SeparateChromosomes2` (Linkage groups) |
-| 03 | `create_lod_summary.sh` | Summarises LOD-limit tests (1–15) |
-| 03 | `plot_sep_chr.R` | Plots linkage-group separation |
+| - | `scripts/create_lod_summary.sh` | Summarises LOD-limit tests (1–15) |
+| - | `scripts/plot_sep_chr.R` | Plots linkage-group separation |
 | 05 | `05_order_*` | `OrderMarkers2` (Infer marker order, recombination fractions) |
 | 06 | `06_fitstepfunction.bsub` | Step-function fit of the ordered maps to physical positions |
 | – | R scripts | Plots, crossover counts, recombination rates |
-| - | `lepmap_plot_order.R`, `lepmap_plot_map_fitted.R` | Plots of marker order and fitted maps |
-| - | `plot_marey_rec_rate_cobs_smoothing.R` | Marey maps; local rate per 100 kb with cobs |
-| - | `summarize_rec_events.R` | Crossovers per chromosome per individual |
-| - | `compare_pop_ped_rec_rate.R` | Spearman correlation of pedigree and pyrho rates |
+| - | `scripts/map_physical_pos_to_ordered_maps.sh` | Maps markers to phyical position |
+| - | `scripts/lepmap_plot_order.R`, `lepmap_plot_map_fitted.R` | Plots of marker order and fitted maps |
+| - | `scripts/plot_marey_rec_rate_cobs_smoothing.R` | Marey maps; local rate per 100 kb with cobs |
+| - | `scripts/summarize_rec_events.R` | Crossovers per chromosome per individual |
+| - | `scripts/compare_pop_ped_rec_rate.R` | Spearman correlation of pedigree and pyrho rates |
 
 
 Additional notes:
@@ -37,7 +38,7 @@ Additional notes:
 ## Inputs and outputs
 
 - Input: BAM files (see `../04_data_processing`), repeat-masked references, pedigree file.
-- Output: linkage maps and Marey maps in `data/results/linkage_maps/`; per-window rates (cM/Mb); crossover counts (Table S7).
+- Output: linkage maps in `data/results/linkage_maps/`; per chromosome and per-window (100kb) rates (cM/Mb)).
 
 ## Software
 
