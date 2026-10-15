@@ -29,6 +29,9 @@ This directory contains a small collection of batch scripts and helper programs 
 - `summarise_repeat_per_chr.sh`  
   Collapses repeat intervals by chromosome and repeat class and reports total covered bases and counts using `awk` and `bedtools groupby`.
 
+- `bedtools_nuc.bsub`  
+  Calculates window-based GC-content using bedtools nuc.
+
 ## Workflow
 
 Repeat annotation
