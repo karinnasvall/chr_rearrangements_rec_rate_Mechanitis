@@ -112,12 +112,6 @@ scripts
 Scripts were written for an LSF cluster (`.bsub`); adjust resource requests for other schedulers.
 
 
-## Software versions
-
-Principal versions reported in the manuscript: BUSCO 6.0.0, OrthoFinder 3.1.0, BEDTools 2.31.1, Helixer 0.3.5, OMArk 0.3.1, nf-core/hic 2.1.0, fastp 0.23.4, bwa-mem2 2.2.1, bcftools 1.20.
-
-
-
 ## Citation
 
 Please cite the article above and the archived release of this repository ([Zenodo DOI]). Machine-readable metadata are in `CITATION.cff`.
