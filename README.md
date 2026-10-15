@@ -14,7 +14,9 @@ Project structure for rearrangement and recombination analyses.
 
 ## Scripts directory structure
 
-The `scripts/` directory currently contains the early analysis stages that are already established in this project tree. The remaining analysis modules are kept in the sibling directory `chr_rearrangements_rec_rate_Mechanitis_extra/` until they are migrated or recreated here.
+- `scripts/01_genome_annotation/` contains the genome assembly, repeat annotation and feature-density workflows.
+- `scripts/02_rearrangements/` contains the breakpoint and ancestral reconstruction workflows.
+
 
 ```text
 scripts/
@@ -45,9 +47,5 @@ scripts/
 ```
 
 ## Notes
-
-- `01_genome_annotation/` contains the genome assembly, repeat annotation and feature-density workflows.
-- `02_rearrangements/` contains the breakpoint and ancestral reconstruction workflows.
-
 
 
