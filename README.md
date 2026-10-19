@@ -29,17 +29,21 @@ Archive: [Zenodo DOI: **will be added at release**] · Raw reads for population 
 
 Folders are numbered in analysis order.
 
-| Folder | Contents | README |
+| Folder | Contents | Main tools |
 |---|---|---|
-| `scripts/01_genome_annotation/` | Gene and repeat annotation and window-based feature densities |
-| `scripts/02_rearrangements/` | Breakpoint detection and ancestral reconstruction |
-| `scripts/03_chromatin/` | Hi-C processing and A/B compartments |
-| `scripts/04_data_processing/` | Trimming, mapping and variant calling of population and pedigree data |
-| `scripts/05_pedigree_recombination/` | Lep-MAP3 linkage maps and crossover-based rates from the F2 pedigrees |
-| `scripts/06_population_recombination/` | Population recombination maps (pyrho) |
-| `scripts/07_recombination_models/` | Recombination rate as a function of genome structure and genomic features |
-| `scripts/08_pop_gen/` | Population structure (ADMIXTURE) and diversity/divergence statistics |
-| `scripts/09_combined_analysis/` | Main analyses and figures |
+| `scripts/01_genome_annotation/` | Gene and repeat annotation and 100 kb window features | Helixer, pantera, RepeatMasker |
+| `scripts/02_rearrangements/` | Characterisation of chromosomal rearrangements, ancestral reconstruction and breakpoint detection | syngraph, AGORA, minimap2, ODP |
+| `scripts/03_chromatin/` | Hi-C processing and A/B compartments | nf-core/hic, HiC-Pro, Cooler, cooltools |
+| `scripts/04_data_processing/` | Read processing. Trimming, mapping and variant calling of population and pedigree data | fastp, bwa-mem2, samtools, bcftools |
+| `scripts/05_pedigree_recombination/` | Lep-MAP3 linkage maps and crossover-based rates from the F2 pedigrees | Lep-MAP3 |
+| `scripts/06_population_recombination/` | Population recombination maps | pyrho |
+| `scripts/07_recombination_models/` | Recombination rate as a function of genome structure and genomic features | R: lme4 |
+| `scripts/08_pop_gen/` | Population structure and diversity/divergence statistics | ADMIXTURE, genomics_general |
+| `scripts/09_combined_analysis/` | Main analyses and figures | R |
+
+
+Scripts were written for an LSF cluster (`.bsub`); adjust resource requests for other schedulers.
+
 
 ```text
 scripts
@@ -92,24 +96,6 @@ scripts
     ├── Figure_2_genome_tracks.R
     └── figure_3_combined_plot_261007.Rmd
 ```
-
-### Mapping manuscript sections to code
-
-| Manuscript section (Methods) | Folder | Main tools | Key outputs |
-|---|---|---|---|
-| Gene annotation, repeats, 100 kb window features | `01_genome_annotation/` | Helixer, pantera, RepeatMasker | gene and repeat occupancy per window |
-| Characterisation of chromosomal rearrangements | `02_rearrangements/` | syngraph, AGORA, minimap2, ODP | Breakpoint table (type, polarity, coordinates), Figure 1 |
-| Chromatin compartments | `03_chromatin/` | nf-core/hic, HiC-Pro, Cooler, cooltools | A/B compartment calls (100 kb) |
-| Read processing, alignment and variant calling | `04_data_processing/` | fastp, bwa-mem2, samtools, bcftools | Filtered bam-files, VCFs, QC and coverage summaries |
-| Pedigree recombination | `05_pedigree_recombination/` | Lep-MAP3 | Linkage maps, crossover counts |
-| Population recombination | `06_population_recombination/` | pyrho | Population recombination maps |
-| Recombination across the genome | `07_recombination_models/` | R: lme4  | Model objects, diagnostics |
-| Differentiation and gene flow | `08_pop_gen/` | ADMIXTURE, genomics_general | π, *D*<sub>XY</sub>, *F*<sub>ST</sub> per 100 kb |
-| Figures and supplementary tables | `09_combined_analysis/` | R | Figures 2–3 and supplementary material |
-
-
-
-Scripts were written for an LSF cluster (`.bsub`); adjust resource requests for other schedulers.
 
 
 ## Citation
