@@ -31,7 +31,7 @@ Folders are numbered in analysis order.
 
 | Folder | Contents | README |
 |---|---|---|
-| `scripts/01_genome_annotation/` | Gene and repeat annotation and window-based feature densities |
+| `scripts/01_genome_annotation/` | Gene and repeat annotation, GC-content and window-based features |
 | `scripts/02_rearrangements/` | Breakpoint detection and ancestral reconstruction |
 | `scripts/03_chromatin/` | Hi-C processing and A/B compartments |
 | `scripts/04_data_processing/` | Trimming, mapping and variant calling of population and pedigree data |
