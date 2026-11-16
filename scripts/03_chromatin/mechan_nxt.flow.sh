@@ -33,6 +33,8 @@ echo "Input CSV: $CSV_PATH"
 echo "Reference FASTA: $FASTA_PATH"
 
 #  Run Nextflow with parameters
+# the path to the folder where you have downloaded nf-core/hic pipeline https://nf-co.re/hic/2.1.0/
+
 nextflow run /lustre/scratch125/tol/teams/meier/projects/heliconius/08_chromatin_structure/hic/ \
   --input "${CSV_PATH}" \
   --fasta "${FASTA_PATH}" \
