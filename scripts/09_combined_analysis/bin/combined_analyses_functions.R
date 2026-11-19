@@ -15,10 +15,6 @@ clean_chr <- function(x) {
 
 
 
-
-library(ggplot2)
-library(dplyr)
-
 # size_df: data.frame with columns chr, chr_len (in bp)
 # track_df: data.frame with columns chr, start, end, value (+ any extra aesthetics)
 # value_col: name of the column to plot on y axis (as string)

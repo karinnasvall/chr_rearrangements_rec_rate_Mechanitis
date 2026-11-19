@@ -26,8 +26,8 @@ source("bin/combined_analyses_functions.R")
 
 ```{r set_variables, echo=FALSE}
 
-GENOME_SIZE="../../breakpoints/anc_reconstruction_pipeline_260609/results/01_genomes/%s_hap1.fa.fai"
-GC="../../breakpoints/composition/output/%s_gc_content_100000.txt"
+GENOME_SIZE="../../../breakpoints/anc_reconstruction_pipeline_260609/results/01_genomes/%s_hap1.fa.fai"
+GC="../../../breakpoints/composition/output/%s_gc_content_100000.txt"
 REPEATS="/lustre/scratch125/tol/teams/meier/projects/ithomiini/comp_gen/09_repeats/pantera/RepeatMasker/%s_2/%s_repeat_occupancy.csv"
 GENE="/lustre/scratch125/tol/teams/meier/projects/ithomiini/comp_gen/03_gene_annotation/helixer/Mec_CDS_density_100kb/%s_1_CDS_100000bp_density.tsv"
 
@@ -159,7 +159,6 @@ sum_rpt_df <- rpt_df %>%
   group_by(genome, chrom) %>% summarise(occupancy = sum(overlap_bases))
 
 
-
 # Add a row for total repeats
 totals <- rpt_df %>%
   group_by(chrom, start, end, genome) %>%
@@ -169,6 +168,11 @@ totals <- rpt_df %>%
   mutate(repeat_family = "Total_repeats")
 
 rpt_df <- bind_rows(rpt_df, totals)
+
+genome_rpt_df <- rpt_df %>%
+  group_by(genome, repeat_family) %>% summarise(occupancy = sum(overlap_bases),
+                                                fraction = sum(overlap_bases)/sum(end-start))
+
 rpt_df <- rpt_df %>% select(!overlap_bases)
 rpt_df <- rpt_df %>% rename(value = fraction_covered)
 rpt_df <- rpt_df %>% rename(chr = chrom)
@@ -606,13 +610,16 @@ sum_gc_df <- sum_gc_df[,c("genome", "chr", "occupancy", "feature")] %>% rename(c
 sum_feat <- rbind(sum_gene_df, sum_rpt_df, sum_gc_df)
 sum_feat$chrom <- clean_chr(sum_feat$chrom)
 
-genome_size_df <- size_df %>% group_by(genome) %>% summarise(genome_len = sum(end))
 
+tot_genome_size <- rpt_df %>% group_by(chrom) %>% summarise(chr_length = max(end, na.rm = T))
+tot_genome_size$genome <- sub("_.*", "", tot_genome_size$chrom)
+tot_genome_size$chrom <- clean_chr(tot_genome_size$chrom)
 
+tot_genome_size %>% group_by(genome) %>% summarise(genome_len = sum(chr_length))
 
-rpt_gene_size_df <- left_join(sum_feat, size_df, by = c("chrom" = "chr", "genome" = "genome")) %>% filter(!grepl("SCAFFOLD", chrom) & !grepl("scaffold", chrom)) %>% mutate(percent=occupancy/end)
-# ilMecLysi212  279425840
-# ilMecPoly1    282253049
+rpt_gene_size_df <- left_join(sum_feat, tot_genome_size, by = c("chrom" = "chrom", "genome" = "genome")) %>% 
+  #filter(!grepl("SCAFFOLD", chrom) & !grepl("scaffold", chrom)) %>% 
+  mutate(percent=occupancy/chr_length)
 
 
 # summary per genome
@@ -638,3 +645,4 @@ ggsave(paste("plots/gene_rpt_vs_chr_length_", Sys.Date(), ".pdf", sep = ""),
        height = 8,
        width = 8)
 
+```
